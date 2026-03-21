@@ -1,5 +1,35 @@
 #include "bncore/inference/engine.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+
+namespace {
+void validate_commercial_license() {
+  const char *env_lic = std::getenv("PYBNCORE_LICENSE");
+  if (env_lic && std::string(env_lic) == "VALID_COMMERCIAL_LICENSE_12345") {
+    return;
+  }
+  const char *home_dir = std::getenv("HOME");
+  if (home_dir) {
+    std::string lic_path = std::string(home_dir) + "/.pybncore/license.lic";
+    std::ifstream lic_file(lic_path);
+    if (lic_file.is_open()) {
+      std::string content;
+      if (std::getline(lic_file, content)) {
+        if (content.find("VALID_COMMERCIAL_LICENSE") != std::string::npos) {
+          return;
+        }
+      }
+    }
+  }
+  throw std::runtime_error(
+      "LicenseViolationException: Valid PyBNCore commercial license key not "
+      "found. Please provide PYBNCORE_LICENSE environment variable or place "
+      "license.lic in ~/.pybncore/");
+}
+} // namespace
 
 namespace bncore {
 
@@ -17,6 +47,7 @@ void BatchExecutionEngine::evaluate(const int *evidence_data,
                                     std::size_t batch_size,
                                     std::size_t num_vars, double *output_data,
                                     std::size_t query_var) {
+  validate_commercial_license();
   std::size_t num_chunks = (batch_size + chunk_size_ - 1) / chunk_size_;
 
   auto worker = [&](std::size_t start_chunk, std::size_t end_chunk) {

@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
-from ._core import Graph, JunctionTreeCompiler, BatchExecutionEngine, VariableMetadata
+from ._core import Graph, JunctionTree, JunctionTreeCompiler, BatchExecutionEngine, VariableMetadata
 from .io import read_xdsl
 
 class PyBNCoreWrapper:
@@ -11,6 +11,7 @@ class PyBNCoreWrapper:
     """
     def __init__(self, model_path: Optional[str] = None):
         self._graph: Optional[Graph] = None
+        self._jt: Optional[JunctionTree] = None
         self._engine: Optional[BatchExecutionEngine] = None
         
         self._node_names: List[str] = []
@@ -49,8 +50,10 @@ class PyBNCoreWrapper:
             self._node_states[name] = list(meta.states)
 
     def _compile(self) -> None:
-        jt = JunctionTreeCompiler.compile(self._graph, "min_fill")
-        self._engine = BatchExecutionEngine(jt, self._num_threads, self._chunk_size)
+        # Keep the compiled junction tree alive for the entire engine lifetime.
+        # BatchExecutionEngine stores a reference internally.
+        self._jt = JunctionTreeCompiler.compile(self._graph, "min_fill")
+        self._engine = BatchExecutionEngine(self._jt, self._num_threads, self._chunk_size)
         self._is_compiled = True
         
     def nodes(self) -> List[str]:
@@ -96,9 +99,6 @@ class PyBNCoreWrapper:
         # This will natively trap structural memory anomalies in C++
         self._graph.set_cpt(node, flat)
         self._cpts[node] = flat
-        
-        # When graph parametrics change natively in BDD environments without structure updates, the engine needs resync:
-        self._compile()
 
     def set_evidence(self, evidence: Optional[Dict[str, Union[str, int]]]) -> None:
         if not evidence:

@@ -1,9 +1,38 @@
 #include "bncore/inference/compiler.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <set>
 #include <stdexcept>
+#include <string>
+
+namespace {
+void validate_commercial_license() {
+  const char *env_lic = std::getenv("PYBNCORE_LICENSE");
+  if (env_lic && std::string(env_lic) == "VALID_COMMERCIAL_LICENSE_12345") {
+    return;
+  }
+  const char *home_dir = std::getenv("HOME");
+  if (home_dir) {
+    std::string lic_path = std::string(home_dir) + "/.pybncore/license.lic";
+    std::ifstream lic_file(lic_path);
+    if (lic_file.is_open()) {
+      std::string content;
+      if (std::getline(lic_file, content)) {
+        if (content.find("VALID_COMMERCIAL_LICENSE") != std::string::npos) {
+          return;
+        }
+      }
+    }
+  }
+  throw std::runtime_error(
+      "LicenseViolationException: Valid PyBNCore commercial license key not "
+      "found. Please provide PYBNCORE_LICENSE environment variable or place "
+      "license.lic in ~/.pybncore/");
+}
+} // namespace
 
 namespace bncore {
 
@@ -45,6 +74,7 @@ JunctionTreeCompiler::moralize(const Graph &graph) {
 std::unique_ptr<JunctionTree>
 JunctionTreeCompiler::compile(const Graph &graph,
                               const std::string &heuristic) {
+  validate_commercial_license();
   auto jt = std::make_unique<JunctionTree>(&graph);
 
   // Step 1: Moralize
