@@ -1,0 +1,73 @@
+Obtaining file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C%2B%2B/bncore
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Getting requirements to build editable: started
+  Getting requirements to build editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: numpy in /Users/akrambatikh/Documents/projects/Libraries/BN C++/.venv/lib/python3.13/site-packages (from pybncore==0.1.0) (2.4.3)
+Building wheels for collected packages: pybncore
+  Building editable for pybncore (pyproject.toml): started
+  Building editable for pybncore (pyproject.toml): finished with status 'error'
+  error: subprocess-exited-with-error
+  
+  × Building editable for pybncore (pyproject.toml) did not run successfully.
+  │ exit code: 1
+  ╰─> [46 lines of output]
+      *** scikit-build-core 0.12.2 using CMake 3.31.2 (editable)
+      *** Configuring CMake...
+      loading initial cache file /var/folders/4j/h5083c5x3f59v0wd15v16qkm0000gn/T/tmp_k7nm509/build/CMakeInit.txt
+      -- The CXX compiler identification is AppleClang 16.0.0.16000026
+      -- Detecting CXX compiler ABI info
+      -- Detecting CXX compiler ABI info - done
+      -- Check for working CXX compiler: /Library/Developer/CommandLineTools/usr/bin/clang++ - skipped
+      -- Detecting CXX compile features
+      -- Detecting CXX compile features - done
+      -- Found Python: /Users/akrambatikh/Documents/projects/Libraries/BN C++/.venv/bin/python3.13 (found suitable version "3.13.0", minimum required is "3.8") found components: Interpreter Development.Module
+      -- Configuring done (0.6s)
+      -- Generating done (0.0s)
+      -- Build files have been written to: /var/folders/4j/h5083c5x3f59v0wd15v16qkm0000gn/T/tmp_k7nm509/build
+      *** Building project with Ninja...
+      [1/20] Building CXX object CMakeFiles/bncore_core.dir/src/dense_tensor.cpp.o
+      [2/20] Building CXX object CMakeFiles/bncore_core.dir/src/factor.cpp.o
+      [3/20] Building CXX object CMakeFiles/bncore_core.dir/src/junction_tree.cpp.o
+      [4/20] Building CXX object CMakeFiles/bncore_core.dir/src/workspace.cpp.o
+      [5/20] Building CXX object CMakeFiles/bncore_core.dir/src/compiler.cpp.o
+      [6/20] Building CXX object CMakeFiles/bncore_core.dir/src/graph.cpp.o
+      [7/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/nb_internals.cpp.o
+      [8/20] Linking CXX static library libbncore_core.a
+      [9/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/nb_func.cpp.o
+      [10/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/nb_enum.cpp.o
+      [11/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/nb_type.cpp.o
+      [12/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/nb_static_property.cpp.o
+      [13/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/trampoline.cpp.o
+      [14/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/implicit.cpp.o
+      [15/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/nb_ndarray.cpp.o
+      [16/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/error.cpp.o
+      [17/20] Building CXX object CMakeFiles/nanobind-static.dir/Users/akrambatikh/Documents/projects/Libraries/BN_C++/.venv/lib/python3.13/site-packages/nanobind/src/common.cpp.o
+      [18/20] Linking CXX static library libnanobind-static.a
+      [19/20] Building CXX object CMakeFiles/pybncore_ext.dir/src_python/main.cpp.o
+      [20/20] Linking CXX shared module _core.cpython-313-darwin.so
+      FAILED: [code=1] _core.cpython-313-darwin.so
+      : && /Library/Developer/CommandLineTools/usr/bin/clang++ -O3 -DNDEBUG -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk -bundle -Wl,-headerpad_max_install_names "-Wl,@/Users/akrambatikh/Documents/projects/Libraries/BN C++/.venv/lib/python3.13/site-packages/nanobind/cmake/darwin-ld-cpython.sym" -Wl,-dead_strip -Wl,-x -Wl,-S -o _core.cpython-313-darwin.so CMakeFiles/pybncore_ext.dir/src_python/main.cpp.o  libnanobind-static.a  libbncore_core.a && :
+      Undefined symbols for architecture arm64:
+        "bncore::BatchExecutionEngine::evaluate(double const*, unsigned long, unsigned long, double*, unsigned long)", referenced from:
+            _object* nanobind::detail::func_create<false, true, nanobind__core_exec_impl(nanobind::module_)::$_1, void, bncore::BatchExecutionEngine&, nanobind::ndarray<double, nanobind::c_contig, nanobind::device::cpu>, nanobind::ndarray<double, nanobind::c_contig, nanobind::device::cpu>, unsigned int, 0ul, 1ul, 2ul, 3ul, nanobind::scope, nanobind::name, nanobind::is_method, nanobind::arg, nanobind::arg, nanobind::arg>(nanobind__core_exec_impl(nanobind::module_)::$_1&&, void (*)(bncore::BatchExecutionEngine&, nanobind::ndarray<double, nanobind::c_contig, nanobind::device::cpu>, nanobind::ndarray<double, nanobind::c_contig, nanobind::device::cpu>, unsigned int), std::__1::integer_sequence<unsigned long, 0ul, 1ul, 2ul, 3ul>, nanobind::scope const&, nanobind::name const&, nanobind::is_method const&, nanobind::arg const&, nanobind::arg const&, nanobind::arg const&)::'lambda'(void*, _object**, unsigned char*, nanobind::rv_policy, nanobind::detail::cleanup_list*)::__invoke(void*, _object**, unsigned char*, nanobind::rv_policy, nanobind::detail::cleanup_list*) in main.cpp.o
+        "bncore::BatchExecutionEngine::BatchExecutionEngine(bncore::JunctionTree const&, unsigned long, unsigned long)", referenced from:
+            _object* nanobind::detail::func_create<false, true, void nanobind::init<bncore::JunctionTree const&, unsigned long, unsigned long>::execute<nanobind::class_<bncore::BatchExecutionEngine>, nanobind::arg, nanobind::arg_v, nanobind::arg_v>(nanobind::class_<bncore::BatchExecutionEngine>&, nanobind::arg const&, nanobind::arg_v const&, nanobind::arg_v const&)::'lambda'(nanobind::pointer_and_handle<bncore::BatchExecutionEngine>, bncore::JunctionTree const&, unsigned long, unsigned long), void, nanobind::pointer_and_handle<bncore::BatchExecutionEngine>, bncore::JunctionTree const&, unsigned long, unsigned long, 0ul, 1ul, 2ul, 3ul, nanobind::scope, nanobind::name, nanobind::is_method, nanobind::arg, nanobind::arg_v, nanobind::arg_v>(void nanobind::init<bncore::JunctionTree const&, unsigned long, unsigned long>::execute<nanobind::class_<bncore::BatchExecutionEngine>, nanobind::arg, nanobind::arg_v, nanobind::arg_v>(nanobind::class_<bncore::BatchExecutionEngine>&, nanobind::arg const&, nanobind::arg_v const&, nanobind::arg_v const&)::'lambda'(nanobind::pointer_and_handle<bncore::BatchExecutionEngine>, bncore::JunctionTree const&, unsigned long, unsigned long)&&, void (*)(nanobind::pointer_and_handle<bncore::BatchExecutionEngine>, bncore::JunctionTree const&, unsigned long, unsigned long), std::__1::integer_sequence<unsigned long, 0ul, 1ul, 2ul, 3ul>, nanobind::scope const&, nanobind::name const&, nanobind::is_method const&, nanobind::arg const&, nanobind::arg_v const&, nanobind::arg_v const&)::'lambda'(void*, _object**, unsigned char*, nanobind::rv_policy, nanobind::detail::cleanup_list*)::__invoke(void*, _object**, unsigned char*, nanobind::rv_policy, nanobind::detail::cleanup_list*) in main.cpp.o
+      ld: symbol(s) not found for architecture arm64
+      clang++: error: linker command failed with exit code 1 (use -v to see invocation)
+      ninja: build stopped: subcommand failed.
+      
+      *** CMake build failed
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+  ERROR: Failed building editable for pybncore
+Failed to build pybncore
+
+[notice] A new release of pip is available: 24.2 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+ERROR: ERROR: Failed to build installable wheels for some pyproject.toml based projects (pybncore)

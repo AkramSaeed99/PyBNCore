@@ -1,0 +1,17 @@
+[build-system]
+requires = ["scikit-build-core", "nanobind"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pybncore"
+version = "0.1.0"
+description = "High-performance C++ Bayesian network library"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+]
+
+[tool.scikit-build]
+wheel.packages = ["pybncore"]
+cmake.build-type = "Release"
