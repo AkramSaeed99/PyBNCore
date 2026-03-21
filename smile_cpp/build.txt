@@ -1,0 +1,9 @@
+SMILE build information:
+product edition: ACADEMIC
+library version: 2.4.0
+release date: 2025-05-10
+commit: 070aab1774fd
+compiler version: Apple clang version 13.1.6 (clang-1316.0.21.2.5)
+compiler flags: -DNDEBUG -arch arm64 -arch x86_64 -mmacosx-version-min=10.9 -fPIC -O3 -ffast-math -fno-finite-math-only
+built on: Sat, 10 May 2025 12:39:47 +0000
+operating system: Darwin arm64

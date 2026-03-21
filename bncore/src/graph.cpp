@@ -46,6 +46,16 @@ void Graph::add_edge(const std::string &parent_name,
   add_edge(get_variable(parent_name).id, get_variable(child_name).id);
 }
 
+void Graph::set_cpt(NodeId id, const std::vector<double> &cpt) {
+  if (id >= variables_.size())
+    throw std::out_of_range("Invalid NodeId");
+  variables_[id].cpt = cpt;
+}
+
+void Graph::set_cpt(const std::string &name, const std::vector<double> &cpt) {
+  set_cpt(name_to_id_.at(name), cpt);
+}
+
 const VariableMetadata &Graph::get_variable(NodeId id) const {
   if (id >= variables_.size())
     throw std::out_of_range("Invalid NodeId.");

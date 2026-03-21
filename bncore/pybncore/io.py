@@ -37,5 +37,6 @@ def read_xdsl(filepath: str) -> tuple[Graph, dict[str, np.ndarray]]:
         if probs_text is not None and probs_text.text:
             probs = np.array(probs_text.text.split(), dtype=np.float64)
             cpt_dict[node_id] = probs
+            graph.set_cpt(node_id, probs)
             
     return graph, cpt_dict

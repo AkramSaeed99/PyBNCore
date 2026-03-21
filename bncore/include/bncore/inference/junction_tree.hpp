@@ -8,6 +8,7 @@ namespace bncore {
 struct Clique {
   std::size_t id;
   std::vector<NodeId> scope;
+  std::vector<NodeId> assigned_cpts;
   Factor base_potential; // Uncalibrated potential
   std::vector<std::size_t> neighbor_cliques;
 };

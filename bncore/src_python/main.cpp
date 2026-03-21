@@ -41,7 +41,15 @@ NB_MODULE(_core, m) {
            nb::arg("name"))
       .def("get_parents", &bncore::Graph::get_parents, nb::arg("id"))
       .def("get_children", &bncore::Graph::get_children, nb::arg("id"))
-      .def("num_variables", &bncore::Graph::num_variables);
+      .def("num_variables", &bncore::Graph::num_variables)
+      .def(
+          "set_cpt",
+          [](bncore::Graph &g, const std::string &name,
+             nb::ndarray<double, nb::c_contig, nb::device::cpu> cpt) {
+            std::vector<double> probs(cpt.data(), cpt.data() + cpt.size());
+            g.set_cpt(name, probs);
+          },
+          nb::arg("name"), nb::arg("cpt"));
 
   nb::class_<bncore::JunctionTree>(m, "JunctionTree");
 

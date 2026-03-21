@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<smile version="1.0" id="BenchmarkNetwork" numsamples="10000" discsamples="10000">
+    <nodes>
+        <cpt id="L0_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.513392 0.486608</probabilities>
+        </cpt>
+        <cpt id="L0_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.559569 0.440431</probabilities>
+        </cpt>
+        <cpt id="L1_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N0 L0_N1</parents>
+            <probabilities>0.288250 0.711750 0.776477 0.223523 0.862076 0.137924 0.538113 0.461887</probabilities>
+        </cpt>
+        <cpt id="L1_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N0 L0_N1</parents>
+            <probabilities>0.472872 0.527128 0.150561 0.849439 0.830621 0.169379 0.872672 0.127328</probabilities>
+        </cpt>
+        <cpt id="L2_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N1</parents>
+            <probabilities>0.856018 0.143982 0.482040 0.517960</probabilities>
+        </cpt>
+        <cpt id="L2_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N1</parents>
+            <probabilities>0.166239 0.833761 0.656167 0.343833</probabilities>
+        </cpt>
+    </nodes>
+</smile>

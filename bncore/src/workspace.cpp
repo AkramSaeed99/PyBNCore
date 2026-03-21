@@ -3,9 +3,61 @@
 namespace bncore {
 
 BatchWorkspace::BatchWorkspace(const JunctionTree &jt, std::size_t batch_size)
-    : jt_(jt), batch_size_(batch_size), allocator_(1024 * 1024 * 10) {
+    : jt_(jt), batch_size_(batch_size), allocator_(1024 * 1024 * 500) {
   for (const auto &clique : jt_.cliques()) {
-    clique_potentials_.push_back(clique.base_potential);
+    const Factor &unbatched = clique.base_potential;
+    std::vector<std::size_t> new_sizes;
+    for (std::size_t i = 0; i < unbatched.scope().size(); ++i) {
+      new_sizes.push_back(unbatched.tensor().shape()[i]);
+    }
+    new_sizes.push_back(batch_size_);
+
+    std::size_t num_states = unbatched.tensor().size();
+    Factor batched(unbatched.scope(), new_sizes,
+                   allocator_.allocate(num_states * batch_size_));
+    batched.tensor().fill(1.0);
+
+    for (NodeId n_id : clique.assigned_cpts) {
+      std::vector<NodeId> family;
+      for (NodeId p : jt_.graph()->get_parents(n_id))
+        family.push_back(p);
+      family.push_back(n_id);
+
+      std::vector<std::size_t> fam_sizes;
+      for (NodeId p : family)
+        fam_sizes.push_back(jt_.graph()->get_variable(p).states.size());
+
+      std::vector<std::size_t> new_fam_sizes = fam_sizes;
+      new_fam_sizes.push_back(batch_size_);
+
+      std::size_t fam_states = 1;
+      for (auto s : fam_sizes)
+        fam_states *= s;
+
+      Factor cpt_factor(family, new_fam_sizes,
+                        allocator_.allocate(fam_states * batch_size_));
+
+      const auto &probs = jt_.graph()->get_variable(n_id).cpt;
+      if (probs.size() == fam_states * batch_size_) {
+        std::copy(probs.begin(), probs.end(), cpt_factor.tensor().data());
+      } else if (probs.size() == fam_states) {
+        for (std::size_t s = 0; s < fam_states; ++s) {
+          double val = probs[s];
+          double *b_ptr = cpt_factor.tensor().data() + s * batch_size_;
+          for (std::size_t b = 0; b < batch_size_; ++b)
+            b_ptr[b] = val;
+        }
+      } else {
+        double uniform = 1.0 / jt_.graph()->get_variable(n_id).states.size();
+        for (std::size_t s = 0; s < fam_states; ++s) {
+          double *b_ptr = cpt_factor.tensor().data() + s * batch_size_;
+          for (std::size_t b = 0; b < batch_size_; ++b)
+            b_ptr[b] = uniform;
+        }
+      }
+      batched = batched.multiply(cpt_factor, &allocator_);
+    }
+    clique_potentials_.push_back(batched);
   }
 
   std::size_t n = jt_.cliques().size();
@@ -44,7 +96,59 @@ void BatchWorkspace::reset(std::size_t new_batch_size) {
   // Repopulate potentials
   clique_potentials_.clear();
   for (const auto &clique : jt_.cliques()) {
-    clique_potentials_.push_back(clique.base_potential);
+    const Factor &unbatched = clique.base_potential;
+    std::vector<std::size_t> new_sizes;
+    for (std::size_t i = 0; i < unbatched.scope().size(); ++i) {
+      new_sizes.push_back(unbatched.tensor().shape()[i]);
+    }
+    new_sizes.push_back(batch_size_);
+
+    std::size_t num_states = unbatched.tensor().size();
+    Factor batched(unbatched.scope(), new_sizes,
+                   allocator_.allocate(num_states * batch_size_));
+    batched.tensor().fill(1.0);
+
+    for (NodeId n_id : clique.assigned_cpts) {
+      std::vector<NodeId> family;
+      for (NodeId p : jt_.graph()->get_parents(n_id))
+        family.push_back(p);
+      family.push_back(n_id);
+
+      std::vector<std::size_t> fam_sizes;
+      for (NodeId p : family)
+        fam_sizes.push_back(jt_.graph()->get_variable(p).states.size());
+
+      std::vector<std::size_t> new_fam_sizes = fam_sizes;
+      new_fam_sizes.push_back(batch_size_);
+
+      std::size_t fam_states = 1;
+      for (auto s : fam_sizes)
+        fam_states *= s;
+
+      Factor cpt_factor(family, new_fam_sizes,
+                        allocator_.allocate(fam_states * batch_size_));
+
+      const auto &probs = jt_.graph()->get_variable(n_id).cpt;
+      if (probs.size() == fam_states * batch_size_) {
+        std::copy(probs.begin(), probs.end(), cpt_factor.tensor().data());
+      } else if (probs.size() == fam_states) {
+        for (std::size_t s = 0; s < fam_states; ++s) {
+          double val = probs[s];
+          double *b_ptr = cpt_factor.tensor().data() + s * batch_size_;
+          for (std::size_t b = 0; b < batch_size_; ++b)
+            b_ptr[b] = val;
+        }
+      } else {
+        double uniform = 1.0 / jt_.graph()->get_variable(n_id).states.size();
+        for (std::size_t s = 0; s < fam_states; ++s) {
+          double *b_ptr = cpt_factor.tensor().data() + s * batch_size_;
+          for (std::size_t b = 0; b < batch_size_; ++b)
+            b_ptr[b] = uniform;
+        }
+      }
+      batched = batched.multiply(cpt_factor, &allocator_);
+    }
+    clique_potentials_.push_back(batched);
   }
 }
 

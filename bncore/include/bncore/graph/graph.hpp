@@ -19,6 +19,9 @@ public:
   void add_edge(NodeId parent, NodeId child);
   void add_edge(const std::string &parent_name, const std::string &child_name);
 
+  void set_cpt(NodeId id, const std::vector<double> &cpt);
+  void set_cpt(const std::string &name, const std::vector<double> &cpt);
+
   [[nodiscard]] const VariableMetadata &get_variable(NodeId id) const;
   [[nodiscard]] const VariableMetadata &
   get_variable(const std::string &name) const;

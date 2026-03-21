@@ -183,6 +183,33 @@ JunctionTreeCompiler::compile(const Graph &graph,
       jt->add_separator(edge.u, edge.v, edge.sepset);
   }
 
+  // Step 5: Initialize Base Potentials with CPTs
+  for (auto &clq : jt->get_mutable_cliques()) {
+    clq.base_potential.tensor().fill(1.0);
+  }
+
+  for (std::size_t i = 0; i < graph.num_variables(); ++i) {
+    std::vector<NodeId> family;
+    for (NodeId p : graph.get_parents(i))
+      family.push_back(p);
+    family.push_back(static_cast<NodeId>(i));
+
+    for (auto &clq : jt->get_mutable_cliques()) {
+      bool contains_family = true;
+      for (NodeId n : family) {
+        if (std::find(clq.scope.begin(), clq.scope.end(), n) ==
+            clq.scope.end()) {
+          contains_family = false;
+          break;
+        }
+      }
+      if (contains_family) {
+        clq.assigned_cpts.push_back(i);
+        break;
+      }
+    }
+  }
+
   return jt;
 }
 

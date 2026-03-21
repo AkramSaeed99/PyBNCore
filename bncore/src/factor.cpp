@@ -41,20 +41,35 @@ Factor Factor::multiply(const Factor &other, BumpAllocator *allocator) const {
     }
   }
 
-  std::size_t batch_size = tensor_.shape().back();
-  new_sizes.push_back(batch_size); // Ensure innermost is batch dim
+  bool a_batched = (scope_.size() + 1 == tensor_.shape().size());
+  bool b_batched = (other.scope_.size() + 1 == other.tensor_.shape().size());
+  std::size_t batch_size = a_batched
+                               ? tensor_.shape().back()
+                               : (b_batched ? other.tensor_.shape().back() : 1);
 
-  Factor result(new_scope, new_sizes);
+  if (a_batched || b_batched) {
+    new_sizes.push_back(batch_size); // Ensure innermost is batch dim
+  }
 
-  std::size_t num_states_C = result.tensor().size() / batch_size;
-  std::size_t num_states_A = tensor_.size() / batch_size;
-  std::size_t num_states_B = other.tensor().size() / batch_size;
+  std::size_t num_elements = std::accumulate(new_sizes.begin(), new_sizes.end(),
+                                             1ULL, std::multiplies<>());
+  Factor result = allocator ? Factor(new_scope, new_sizes,
+                                     allocator->allocate(num_elements))
+                            : Factor(new_scope, new_sizes);
+
+  std::size_t num_states_C = num_elements / batch_size;
+  std::size_t num_states_A = tensor_.size() / (a_batched ? batch_size : 1);
+  std::size_t num_states_B =
+      other.tensor().size() / (b_batched ? batch_size : 1);
+
+  std::vector<std::size_t> c_indices(new_scope.size());
+  std::vector<std::size_t> a_indices(scope_.size());
+  std::vector<std::size_t> b_indices(other.scope_.size());
 
   // To avoid writing a fully recursive unraveller, we use a simple flat map
   // here for v1 MVP Ideally, precompute strides into a linear mapping table
   for (std::size_t c_idx = 0; c_idx < num_states_C; ++c_idx) {
     // Unravel C
-    std::vector<std::size_t> c_indices(new_scope.size());
     std::size_t temp = c_idx;
     std::size_t stride = 1;
     for (int i = static_cast<int>(new_scope.size()) - 1; i >= 0; --i) {
@@ -63,12 +78,10 @@ Factor Factor::multiply(const Factor &other, BumpAllocator *allocator) const {
     }
 
     // Map to A
-    std::vector<std::size_t> a_indices(scope_.size());
     for (std::size_t i = 0; i < scope_.size(); ++i)
       a_indices[i] = c_indices[i]; // A is prefix
 
     // Map to B
-    std::vector<std::size_t> b_indices(other.scope_.size());
     for (std::size_t j = 0; j < other.scope_.size(); ++j)
       b_indices[j] = c_indices[b_in_c[j]];
 
@@ -87,12 +100,15 @@ Factor Factor::multiply(const Factor &other, BumpAllocator *allocator) const {
     }
 
     double *c_ptr = result.tensor().data() + c_idx * batch_size;
-    const double *a_ptr = tensor_.data() + a_idx * batch_size;
-    const double *b_ptr = other.tensor().data() + b_idx * batch_size;
+    const double *a_ptr = tensor_.data() + a_idx * (a_batched ? batch_size : 1);
+    const double *b_ptr =
+        other.tensor().data() + b_idx * (b_batched ? batch_size : 1);
 
 #pragma omp simd
     for (std::size_t b = 0; b < batch_size; ++b) {
-      c_ptr[b] = a_ptr[b] * b_ptr[b];
+      double val_a = a_batched ? a_ptr[b] : a_ptr[0];
+      double val_b = b_batched ? b_ptr[b] : b_ptr[0];
+      c_ptr[b] = val_a * val_b;
     }
   }
   return result;
@@ -112,8 +128,12 @@ Factor Factor::marginalize(const std::vector<NodeId> &marg_vars,
     }
   }
 
-  std::size_t batch_size = tensor_.shape().back();
-  new_sizes.push_back(batch_size);
+  bool is_batched = (scope_.size() + 1 == tensor_.shape().size());
+  std::size_t batch_size = is_batched ? tensor_.shape().back() : 1;
+
+  if (is_batched) {
+    new_sizes.push_back(batch_size);
+  }
 
   std::size_t num_elements = std::accumulate(new_sizes.begin(), new_sizes.end(),
                                              1ULL, std::multiplies<>());
@@ -121,10 +141,15 @@ Factor Factor::marginalize(const std::vector<NodeId> &marg_vars,
                                      allocator->allocate(num_elements))
                             : Factor(new_scope, new_sizes);
 
+  if (allocator) {
+    result.tensor().fill(0.0);
+  }
+
   std::size_t num_states_A = tensor_.size() / batch_size;
 
+  std::vector<std::size_t> a_indices(scope_.size());
+
   for (std::size_t a_idx = 0; a_idx < num_states_A; ++a_idx) {
-    std::vector<std::size_t> a_indices(scope_.size());
     std::size_t temp = a_idx;
     std::size_t stride = 1;
     for (int i = static_cast<int>(scope_.size()) - 1; i >= 0; --i) {
