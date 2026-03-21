@@ -17,6 +17,8 @@ public:
                 std::size_t num_vars, double *output_data,
                 std::size_t query_var);
 
+  const JunctionTree &junction_tree() const { return jt_; }
+
 private:
   const JunctionTree &jt_;
   std::size_t num_threads_;

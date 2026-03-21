@@ -48,12 +48,9 @@ BatchWorkspace::BatchWorkspace(const JunctionTree &jt, std::size_t batch_size)
             b_ptr[b] = val;
         }
       } else {
-        double uniform = 1.0 / jt_.graph()->get_variable(n_id).states.size();
-        for (std::size_t s = 0; s < fam_states; ++s) {
-          double *b_ptr = cpt_factor.tensor().data() + s * batch_size_;
-          for (std::size_t b = 0; b < batch_size_; ++b)
-            b_ptr[b] = uniform;
-        }
+        throw std::invalid_argument("BatchWorkspace: CPT geometry bound "
+                                    "strictly mismatched for Node ID " +
+                                    std::to_string(n_id) + ".");
       }
       batched = batched.multiply(cpt_factor, &allocator_);
     }
@@ -139,12 +136,9 @@ void BatchWorkspace::reset(std::size_t new_batch_size) {
             b_ptr[b] = val;
         }
       } else {
-        double uniform = 1.0 / jt_.graph()->get_variable(n_id).states.size();
-        for (std::size_t s = 0; s < fam_states; ++s) {
-          double *b_ptr = cpt_factor.tensor().data() + s * batch_size_;
-          for (std::size_t b = 0; b < batch_size_; ++b)
-            b_ptr[b] = uniform;
-        }
+        throw std::invalid_argument("BatchWorkspace: CPT geometry bound "
+                                    "strictly mismatched for Node ID " +
+                                    std::to_string(n_id) + ".");
       }
       batched = batched.multiply(cpt_factor, &allocator_);
     }

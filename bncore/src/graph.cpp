@@ -49,6 +49,19 @@ void Graph::add_edge(const std::string &parent_name,
 void Graph::set_cpt(NodeId id, const std::vector<double> &cpt) {
   if (id >= variables_.size())
     throw std::out_of_range("Invalid NodeId");
+
+  std::size_t expected = variables_[id].states.size();
+  for (NodeId p : parents_[id]) {
+    expected *= variables_[p].states.size();
+  }
+
+  if (cpt.size() != expected) {
+    throw std::invalid_argument("CPT size mismatch for variable " +
+                                variables_[id].name + ". Expected " +
+                                std::to_string(expected) + " but got " +
+                                std::to_string(cpt.size()));
+  }
+
   variables_[id].cpt = cpt;
 }
 

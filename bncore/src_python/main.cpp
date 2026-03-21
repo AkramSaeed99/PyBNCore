@@ -74,9 +74,14 @@ NB_MODULE(_core, m) {
             std::size_t batch_size = evidence.shape(0);
             std::size_t num_vars = evidence.shape(1);
 
-            if (output.shape(0) != batch_size) {
-              throw std::invalid_argument(
-                  "Output buffer shape must match batch size.");
+            std::size_t n_states = engine.junction_tree()
+                                       .graph()
+                                       ->get_variable(query_var)
+                                       .states.size();
+            if (output.ndim() != 2 || output.shape(0) != batch_size ||
+                output.shape(1) != n_states) {
+              throw std::invalid_argument("Output buffer MUST natively match "
+                                          "(batch_size, num_states).");
             }
 
             // release GIL
