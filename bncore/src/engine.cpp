@@ -53,36 +53,21 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
   }
 
   std::size_t num_chunks = (batch_size + chunk_size_ - 1) / chunk_size_;
+  // P2: Use query_marginals_multi — single clique scan for all queries,
+  // with pre-baked state_of_dim maps (no Factor::marginalize allocation).
+  // Convert size_t query_vars to NodeId (uint32_t) once here.
+  std::vector<bncore::NodeId> qvars_nodeid(num_queries);
+  for (std::size_t i = 0; i < num_queries; ++i)
+    qvars_nodeid[i] = static_cast<bncore::NodeId>(query_vars[i]);
+
   auto write_query_outputs = [&](BatchWorkspace &workspace,
                                  std::size_t current_batch_start,
                                  std::size_t current_chunk_size) {
-    for (std::size_t qi = 0; qi < num_queries; ++qi) {
-      const std::size_t query_var = query_vars[qi];
-      const std::size_t state_offset = output_offsets[qi];
-      const std::size_t num_states =
-          output_offsets[qi + 1] - output_offsets[qi];
-
-      DenseTensor marginal = workspace.query_marginal(query_var);
-      if (marginal.shape().empty() || marginal.shape()[0] != num_states) {
-        throw std::invalid_argument(
-            "BatchExecutionEngine::evaluate_multi: output offset geometry "
-            "does not match query variable state count.");
-      }
-
-      for (std::size_t b = 0; b < current_chunk_size; ++b) {
-        double sum = 0.0;
-        for (std::size_t s = 0; s < num_states; ++s) {
-          sum += marginal.data()[s * current_chunk_size + b];
-        }
-        for (std::size_t s = 0; s < num_states; ++s) {
-          output_data[(current_batch_start + b) * total_states + state_offset +
-                      s] =
-              (sum > 0.0) ? (marginal.data()[s * current_chunk_size + b] / sum)
-                          : 0.0;
-        }
-      }
-    }
+    double *out_row = output_data + current_batch_start * total_states;
+    workspace.query_marginals_multi(qvars_nodeid.data(), num_queries,
+                                    output_offsets, out_row);
   };
+
 
   // Fast path for the most common Python/HCL usage pattern:
   // single context query repeatedly from the same engine instance.

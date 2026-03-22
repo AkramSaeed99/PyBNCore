@@ -61,3 +61,8 @@ source .venv/bin/activate
 pip install -e .
 python examples/test_api.py
 ```
+
+## 📜 License
+This project is licensed under a **Proprietary License**. 
+Copyright (c) 2026 **Akram Batikh** <asbatikh@ncsu.edu>. 
+All Rights Reserved.

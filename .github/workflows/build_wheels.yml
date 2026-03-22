@@ -46,8 +46,8 @@ jobs:
 
   # No SDIST job here. We specifically block source distribution for commercial restrictions.
 
-  publish:
-    name: Publish restricted wheels to GitHub Releases
+  release:
+    name: Publish wheels to GitHub Releases
     needs: [build_wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
@@ -63,3 +63,8 @@ jobs:
         with:
           files: dist/*.whl
           generate_release_notes: true
+
+      # PyPI publishing is intentionally REMOVED from this automated workflow.
+      # Publish to PyPI manually only after full correctness validation,
+      # using: twine upload dist/*.whl
+

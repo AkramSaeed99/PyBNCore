@@ -66,31 +66,47 @@ JunctionTreeCompiler::compile(const Graph &graph,
 
   for (std::size_t step = 0; step < n; ++step) {
     std::size_t best_node = n;
-    std::size_t min_fill = std::numeric_limits<std::size_t>::max();
+    // P4: min-weight heuristic — score = product of state counts of the new
+    // clique (node + active neighbours).  For equal weights we break ties by
+    // fewer fill edges, then by smaller clique size.  This avoids selecting
+    // high-cardinality nodes that would create enormous clique tables.
+    std::size_t best_weight = std::numeric_limits<std::size_t>::max();
+    std::size_t best_fill   = std::numeric_limits<std::size_t>::max();
+    std::size_t best_size   = std::numeric_limits<std::size_t>::max();
 
     for (std::size_t i = 0; i < n; ++i) {
-      if (eliminated[i])
-        continue;
+      if (eliminated[i]) continue;
+
+      std::vector<NodeId> neighbors;
+      for (NodeId neighbor : adj[i])
+        if (!eliminated[neighbor]) neighbors.push_back(neighbor);
 
       std::size_t fill_edges = 0;
-      std::vector<NodeId> neighbors;
-      for (NodeId neighbor : adj[i]) {
-        if (!eliminated[neighbor])
-          neighbors.push_back(neighbor);
-      }
-
-      for (std::size_t u = 0; u < neighbors.size(); ++u) {
-        for (std::size_t v = u + 1; v < neighbors.size(); ++v) {
+      for (std::size_t u = 0; u < neighbors.size(); ++u)
+        for (std::size_t v = u + 1; v < neighbors.size(); ++v)
           if (std::find(adj[neighbors[u]].begin(), adj[neighbors[u]].end(),
-                        neighbors[v]) == adj[neighbors[u]].end()) {
+                        neighbors[v]) == adj[neighbors[u]].end())
             fill_edges++;
-          }
-        }
-      }
 
-      if (fill_edges < min_fill) {
-        min_fill = fill_edges;
-        best_node = i;
+      // Compute clique weight = product of state counts (cap at ULLONG_MAX/2
+      // to avoid overflow — just needs to be a consistent ordering).
+      std::size_t weight = graph.get_variable(i).states.size();
+      for (NodeId nb : neighbors) {
+        std::size_t ns = graph.get_variable(nb).states.size();
+        if (weight > (std::numeric_limits<std::size_t>::max() / 2) / ns)
+          weight = std::numeric_limits<std::size_t>::max() / 2; // saturate
+        else
+          weight *= ns;
+      }
+      std::size_t clique_sz = neighbors.size() + 1;
+
+      if (weight < best_weight ||
+          (weight == best_weight && fill_edges < best_fill) ||
+          (weight == best_weight && fill_edges == best_fill && clique_sz < best_size)) {
+        best_weight = weight;
+        best_fill   = fill_edges;
+        best_size   = clique_sz;
+        best_node   = i;
       }
     }
 

@@ -25,6 +25,8 @@ public:
   double *data();
   const double *data() const;
 
+  void bind_data(double *ptr);
+
   void multiply_inplace(const DenseTensor &other);
   void fill(double value);
 

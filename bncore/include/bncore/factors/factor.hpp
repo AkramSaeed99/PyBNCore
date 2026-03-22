@@ -23,6 +23,10 @@ public:
   DenseTensor &tensor() { return tensor_; }
   [[nodiscard]] const DenseTensor &tensor() const { return tensor_; }
 
+  void bind_data(double *ptr);
+
+  // Core math operations
+
 private:
   std::vector<NodeId> scope_;
   DenseTensor tensor_;

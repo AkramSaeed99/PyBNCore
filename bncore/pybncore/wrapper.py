@@ -202,6 +202,15 @@ class PyBNCoreWrapper:
     def clear_evidence(self) -> None:
         self._evidence.clear()
         
+    def update_beliefs(self) -> None:
+        """
+        Forces a calibration sequence. Used heavily by HCL mapping
+        validation to catch and cache impossible joint evidence pairs.
+        """
+        nodes = self.nodes()
+        if nodes:
+            self.batch_query_marginals([nodes[0]])
+        
     def query_p(self, node: str, state: Union[str, int]) -> float:
         marginals = self.batch_query_marginals([node])
         pmf_dict = marginals[node]

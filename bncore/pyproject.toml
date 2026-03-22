@@ -7,6 +7,10 @@ name = "pybncore"
 version = "0.1.0"
 description = "High-performance C++ Bayesian network library"
 readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Akram Batikh", email = "asbatikh@ncsu.edu"}
+]
 requires-python = ">=3.8"
 dependencies = [
     "numpy>=1.24,<2.0",

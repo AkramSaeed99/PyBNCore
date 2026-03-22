@@ -52,6 +52,8 @@ const double *DenseTensor::data() const {
   return mapped_data_ ? mapped_data_ : owned_data_.data();
 }
 
+void DenseTensor::bind_data(double *ptr) { mapped_data_ = ptr; }
+
 void DenseTensor::multiply_inplace(const DenseTensor &other) {
   if (shape_ != other.shape_) {
     throw std::invalid_argument(
