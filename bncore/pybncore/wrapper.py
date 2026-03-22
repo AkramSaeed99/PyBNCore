@@ -99,6 +99,8 @@ class PyBNCoreWrapper:
         # This will natively trap structural memory anomalies in C++
         self._graph.set_cpt(node, flat)
         self._cpts[node] = flat
+        if self._engine is not None and hasattr(self._engine, "invalidate_workspace_cache"):
+            self._engine.invalidate_workspace_cache()
 
     def set_evidence(self, evidence: Optional[Dict[str, Union[str, int]]]) -> None:
         if not evidence:
@@ -127,6 +129,9 @@ class PyBNCoreWrapper:
     def batch_query_marginals(self, nodes: Sequence[str], evidence_matrix: Optional[np.ndarray] = None) -> Union[Dict[str, Dict[str, float]], Dict[str, np.ndarray]]:
         if not self._is_compiled:
             self._compile()
+
+        if not nodes:
+            return {}
             
         is_batch = evidence_matrix is not None
         
@@ -143,22 +148,49 @@ class PyBNCoreWrapper:
                 node_id = self._name_to_id[e_node]
                 state_idx = self._node_states[e_node].index(e_state)
                 ev_array[0, node_id] = state_idx
-                
-        results = {}
-        for query_node in nodes:
+
+        query_nodes = [str(n) for n in nodes]
+        results: Dict[str, Union[Dict[str, float], np.ndarray]] = {}
+
+        # Fast path: one calibrated inference pass for all requested query vars.
+        if hasattr(self._engine, "evaluate_multi"):
+            query_ids = np.asarray([self._name_to_id[n] for n in query_nodes], dtype=np.int64)
+            offsets = [0]
+            for n in query_nodes:
+                offsets.append(offsets[-1] + len(self._node_states[n]))
+            offset_arr = np.asarray(offsets, dtype=np.int64)
+            total_states = int(offset_arr[-1])
+
+            output = np.zeros((batch_size, total_states), dtype=np.float64, order='C')
+            self._engine.evaluate_multi(ev_array, output, query_ids, offset_arr)
+
+            for i, query_node in enumerate(query_nodes):
+                start = int(offset_arr[i])
+                end = int(offset_arr[i + 1])
+                block = output[:, start:end]
+                if is_batch:
+                    results[query_node] = block
+                else:
+                    pmf = block[0]
+                    results[query_node] = {
+                        s_label: float(pmf[j])
+                        for j, s_label in enumerate(self._node_states[query_node])
+                    }
+            return results
+
+        # Compatibility fallback: evaluate each query variable separately.
+        for query_node in query_nodes:
             node_id = self._name_to_id[query_node]
             n_states = len(self._node_states[query_node])
-            
             output = np.zeros((batch_size, n_states), dtype=np.float64, order='C')
             self._engine.evaluate(ev_array, output, node_id)
-            
             if is_batch:
                 results[query_node] = output
             else:
                 pmf = output[0]
                 results[query_node] = {
-                    s_label: float(pmf[i]) 
+                    s_label: float(pmf[i])
                     for i, s_label in enumerate(self._node_states[query_node])
                 }
-                
+
         return results

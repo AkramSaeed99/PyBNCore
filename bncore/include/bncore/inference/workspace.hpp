@@ -21,11 +21,15 @@ public:
   DenseTensor query_marginal(NodeId node) const;
 
 private:
+  void rebuild_clique_potentials(std::size_t target_batch_size);
+  void snapshot_base_potentials();
+
   const JunctionTree &jt_;
   std::size_t batch_size_;
   BumpAllocator allocator_;
 
   std::vector<Factor> clique_potentials_;
+  std::vector<Factor> base_clique_potentials_;
   const int *evidence_matrix_ = nullptr;
   std::size_t evidence_num_vars_ = 0;
 

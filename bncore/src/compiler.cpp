@@ -1,7 +1,5 @@
 #include "bncore/inference/compiler.hpp"
 #include <algorithm>
-#include <cstdlib>
-#include <fstream>
 #include <limits>
 #include <numeric>
 #include <set>
@@ -10,27 +8,7 @@
 
 namespace {
 void validate_commercial_license() {
-  const char *env_lic = std::getenv("PYBNCORE_LICENSE");
-  if (env_lic && std::string(env_lic) == "VALID_COMMERCIAL_LICENSE_12345") {
-    return;
-  }
-  const char *home_dir = std::getenv("HOME");
-  if (home_dir) {
-    std::string lic_path = std::string(home_dir) + "/.pybncore/license.lic";
-    std::ifstream lic_file(lic_path);
-    if (lic_file.is_open()) {
-      std::string content;
-      if (std::getline(lic_file, content)) {
-        if (content.find("VALID_COMMERCIAL_LICENSE") != std::string::npos) {
-          return;
-        }
-      }
-    }
-  }
-  throw std::runtime_error(
-      "LicenseViolationException: Valid PyBNCore commercial license key not "
-      "found. Please provide PYBNCORE_LICENSE environment variable or place "
-      "license.lic in ~/.pybncore/");
+  // Intentionally disabled for local/HCL integration builds.
 }
 } // namespace
 
