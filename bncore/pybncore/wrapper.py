@@ -82,6 +82,13 @@ class PyBNCoreWrapper:
             expected_rows *= len(self._node_states[p])
             
         return flat.copy().reshape((expected_rows, n_card))
+
+    def _expected_row_count(self, node: str) -> int:
+        parents = self.parents(node)
+        expected_rows = 1
+        for p in parents:
+            expected_rows *= len(self._node_states[p])
+        return int(expected_rows)
         
     def set_cpt(self, node: str, shaped: np.ndarray, validate: bool = False) -> None:
         if shaped.ndim != 2:
@@ -101,6 +108,84 @@ class PyBNCoreWrapper:
         self._cpts[node] = flat
         if self._engine is not None and hasattr(self._engine, "invalidate_workspace_cache"):
             self._engine.invalidate_workspace_cache()
+
+    def set_cpt_batched(self, node: str, shaped_batched: np.ndarray, validate: bool = False) -> None:
+        """
+        Set a batched CPT tensor for `node` with shape (rows, node_card, batch_size).
+        This is a pybncore-specific fast path used by HCL BN-UQ vectorized execution.
+        """
+        arr = np.asarray(shaped_batched, dtype=np.float64)
+        if arr.ndim != 3:
+            raise ValueError(f"Batched CPT for '{node}' must be 3D (rows, node_card, batch_size).")
+
+        expected_rows = self._expected_row_count(node)
+        n_card = len(self._node_states[node])
+        if arr.shape[0] != expected_rows or arr.shape[1] != n_card:
+            raise ValueError(
+                f"Batched CPT for '{node}' has invalid shape {arr.shape}; "
+                f"expected ({expected_rows}, {n_card}, batch_size)."
+            )
+        if arr.shape[2] <= 0:
+            raise ValueError(f"Batched CPT for '{node}' must have batch_size > 0.")
+
+        if validate:
+            sums = np.sum(arr, axis=1)
+            if not np.allclose(sums, 1.0, atol=1e-8):
+                raise ValueError(
+                    f"Batched CPT rows for '{node}' must sum to 1.0 for every sample."
+                )
+            if np.any(arr < -1e-15) or np.any(arr > 1 + 1e-15):
+                raise ValueError(f"Batched CPT values for '{node}' are outside [0, 1].")
+
+        flat = np.ascontiguousarray(arr, dtype=np.float64).ravel(order="C")
+        self._graph.set_cpt(node, flat)
+
+        # Keep scalar-shaped mirror for APIs expecting 2D retrieval.
+        self._cpts[node] = np.ascontiguousarray(arr[:, :, 0], dtype=np.float64).ravel(order="C")
+        if self._engine is not None and hasattr(self._engine, "invalidate_workspace_cache"):
+            self._engine.invalidate_workspace_cache()
+
+    def make_evidence_matrix(
+        self, evidence: Optional[Dict[str, Union[str, int]]], batch_size: int
+    ) -> np.ndarray:
+        """
+        Build a contiguous evidence matrix of shape (batch_size, num_vars) with -1 for unknown.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+        num_vars = len(self._name_to_id)
+        ev_array = np.full((int(batch_size), num_vars), -1, dtype=np.int32)
+        if not evidence:
+            return ev_array
+        for node, state in evidence.items():
+            node_name = str(node)
+            if node_name not in self._name_to_id:
+                raise KeyError(f"Unknown node '{node_name}' in evidence.")
+            if isinstance(state, int):
+                state_idx = int(state)
+            else:
+                outcomes = self._node_states[node_name]
+                if state in outcomes:
+                    state_idx = outcomes.index(state)
+                else:
+                    tgt = "".join(ch for ch in str(state).lower() if ch.isalnum())
+                    state_idx = -1
+                    for i, out in enumerate(outcomes):
+                        norm_out = "".join(ch for ch in str(out).lower() if ch.isalnum())
+                        if norm_out == tgt:
+                            state_idx = i
+                            break
+                    if state_idx < 0:
+                        raise ValueError(
+                            f"Unknown outcome '{state}' for node '{node_name}' "
+                            f"(outcomes={outcomes})"
+                        )
+            if state_idx < 0 or state_idx >= len(self._node_states[node_name]):
+                raise IndexError(
+                    f"Evidence state index {state_idx} out of range for node '{node_name}'."
+                )
+            ev_array[:, self._name_to_id[node_name]] = int(state_idx)
+        return ev_array
 
     def set_evidence(self, evidence: Optional[Dict[str, Union[str, int]]]) -> None:
         if not evidence:
