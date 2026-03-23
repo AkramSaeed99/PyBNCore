@@ -1,0 +1,407 @@
+# PyBNCore: Exact Inference Solver — Technical Algorithm Description
+
+> Audience: highly technical reviewers. Derived from source code, not from generic BN literature.
+> Source files referenced: [workspace.cpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp), [engine.cpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/engine.cpp), [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp), [junction_tree.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp), [compiler.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/compiler.hpp), [graph.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp), [node.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/node.hpp).
+
+---
+
+## 1. Solver Purpose
+
+PyBNCore implements **exact discrete-variable Bayesian network inference** using the Hugin-style junction tree (JT) algorithm. Given a directed acyclic graph (DAG) with discrete random variables, their conditional probability tables (CPTs), and optionally a set of hard evidence assignments, the solver computes exact posterior marginal distributions over one or more query variables. The computation is exact (no approximation) for the class of models where the JT clique sizes are tractable.
+
+---
+
+## 2. Inputs and Outputs
+
+### Inputs
+| Symbol | Type | Description |
+|--------|------|-------------|
+| $G$ | [Graph](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp#10-42) | A DAG. Each node is a [VariableMetadata](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/node.hpp#10-18) with a name, a list of string-valued discrete states, and a flat CPT (`std::vector<double>`). |
+| $\mathcal{E}$ | `const int*` (flat matrix) | Optional evidence matrix of shape $[B \times N_\text{vars}]$, row-major. Entry $e[b][v] \geq 0$ denotes that variable $v$ is observed in state $e[b][v]$ for batch row $b$. Entry $-1$ means unobserved. |
+| $Q$ | `const size_t*` | List of $Q$ query variable IDs. |
+| `offsets` | `const size_t*` | Prefix-sum array of length $Q+1$ giving the output buffer slice for each query variable. |
+| $B$ | `size_t` | Batch size: number of evidence rows to process. |
+
+### Outputs
+| Symbol | Type | Description |
+|--------|------|-------------|
+| `output_data` | `double*` | Flat buffer of shape $[B \times \sum_q k_q]$, where $k_q$ is the state count of query variable $q$. Each $[b, q, s]$ entry is $P(X_q = s \mid \mathcal{E}_b)$, normalized. |
+
+---
+
+## 3. Main Algorithm Overview
+
+The solver operates in two clearly separated phases:
+
+**Phase I — Compile-time preprocessing** (`JunctionTreeCompiler::compile`, [BatchWorkspace](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#57-58) constructor, [build_message_schedule](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#138-321)):
+Triangulate the DAG, construct the junction tree, assign CPTs to cliques, and pre-compute all index maps needed for hot-path message passing. This phase runs once per model and is not repeated per query.
+
+**Phase II — Runtime inference** (`BatchWorkspace::calibrate`, [query_marginals_multi](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#929-1080)):
+Given an evidence assignment, apply it to the clique potentials, run one pass of collect (leaves → root) and distribute (root → leaves) message passing, assemble calibrated beliefs for each clique, and extract and normalize marginals for the queried variables. The hot path performs zero heap allocation.
+
+---
+
+## 4. Detailed Algorithm Description
+
+### 4.1 Graph Representation
+
+The class [Graph](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp#10-42) stores the DAG as a set of [VariableMetadata](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/node.hpp#10-18) records (indexed by `NodeId = uint32_t`) plus parent/child adjacency lists. Each [VariableMetadata](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/node.hpp#10-18) stores the CPT as a flat `std::vector<double>` in row-major parent-configuration-major order. There is no lazy or symbolic parameter representation; all CPT values are stored as concrete doubles.
+
+### 4.2 Junction Tree Compilation ([JunctionTreeCompiler](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/compiler.hpp#10-18), [compiler.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/compiler.hpp))
+
+`JunctionTreeCompiler::compile` accepts a [Graph](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp#10-42) and a triangulation heuristic string (default: `"min_fill"`). The implementation:
+
+1. **Moralizes** the DAG by adding edges between co-parents ([moralize](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/compiler.cpp#17-51)).
+2. **Triangulates** the moral graph using the min-fill heuristic (or an alternative if specified). The exact triangulation code is not in the files directly inspected; [moralize](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/compiler.cpp#17-51) is a private static method and the main [compile](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/compiler.cpp#52-239) routine invokes it.
+3. **Identifies maximal cliques** of the chordal graph.
+4. **Constructs a maximum spanning tree** over the cliques, using sepset weight (intersection size) as the edge weight. This produces the junction tree.
+5. **Assigns CPTs to cliques**: each CPT for node $v$ is assigned to the clique whose scope is a superset of $\{v\} \cup \text{parents}(v)$. The assignment is stored as `Clique::assigned_cpts`.
+
+The result is a [JunctionTree](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#22-44) object containing a list of [Clique](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#8-15) structs, each holding:
+- [scope](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#23-35): the set of variables in the clique (sorted `vector<NodeId>`).
+- `assigned_cpts`: node IDs whose CPTs are multiplied into this clique's base potential.
+- [base_potential](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#357-370): the product of assigned CPTs, stored as a [Factor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp#8-34).
+- `neighbor_cliques`: adjacency list for the undirected JT.
+
+> **Exact vs. approximate**: the JT algorithm is exact for any triangulation; the min-fill heuristic affects only tree width (and hence runtime), not correctness.
+
+### 4.3 Workspace Construction and Preprocessing (`BatchWorkspace::BatchWorkspace`, [build_message_schedule](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#138-321))
+
+[BatchWorkspace](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#57-58) is the per-inference working memory. Its constructor accepts the compiled [JunctionTree](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#22-44) and a `batch_size`. Construction proceeds as follows:
+
+#### 4.3.1 Tree Orientation (BFS)
+
+A depth-first (stack-based) traversal of the JT adjacency lists assigns a root clique (first clique visited), computes `parent_of_[u]` and `children_of_[u]` for each clique $u$, and derives two traversal orders in [O(|C|)](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#14-21):
+- `collect_order_`: leaf-to-root (reverse of BFS discovery order).
+- `distribute_order_`: root-to-leaf (BFS discovery order).
+
+#### 4.3.2 Index Map Pre-computation
+
+For every edge $u \to \text{parent}(u)$ in the oriented tree, three operations are pre-computed and stored in [CollectOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#14-21), [DistributeOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#22-32), and [AssembleOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#33-40) structs. All maps are precomputed once and stored as `vector<uint32_t>`:
+
+**[build_pot_map_u32](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#36-61)** (`workspace.cpp:38`): For a given product scope (union of clique scope and sepsets), builds a flat map `pot_map[prod_idx] → src_flat_idx`. For every flat index in the product state space it decodes the multi-dimensional coordinates, then re-encodes only the source-scope coordinates. This reduces every message computation to a gather over a flat array with a precomputed integer index, eliminating all runtime stride arithmetic.
+
+**[build_marg_map_u32](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#62-85)** (`workspace.cpp:63`): For a given source scope and a destination scope (a subset), builds `marg_map[src_flat_idx] → dst_flat_idx`. This reduces marginalization (summing out variables) to a scatter-add with a precomputed integer index.
+
+**[CollectOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#14-21)** (per non-root clique $u$):
+- `product_states`: $|\prod_{v \in \text{scope}(u) \cup \text{sepsets of children}}|$.
+- `pot_map[pi]`: gather index from clique $u$'s potential to the product space.
+- `child_maps[ci][pi]`: gather index from child $c_i$'s up-message buffer to the product space.
+- `marg_map[pi]`: scatter index from product space to $u$'s up-message buffer (= sepset with parent).
+
+**[DistributeOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#22-32)** (per non-root clique $u$):
+- Analogous construction for the downward pass, using the parent clique's scope, the parent's down-message buffer, and all sibling up-message buffers.
+
+**[AssembleOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#33-40)** (per clique $i$):
+- Maps from the parent down-message and all child up-messages into the clique's own calibrated potential.
+
+#### 4.3.3 Additional Preprocessing
+
+**[CliqueMargInfo](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#46-54)** (`workspace.cpp:293`): For each clique $i$ and each variable position $d$ in its scope, a `uint8_t` array `state_of_dim[d][flat_idx]` is pre-computed. Entry $[\![d]\!][\![f]\!]$ gives the state index of dimension $d$ at flat potential index $f$. This replaces `Factor::marginalize` at query time with a direct accumulation loop, eliminating all temporary factor allocation during query extraction.
+
+**Scratch buffer** (`scratch_buf_`): A single `vector<double>` of length `max_product_states * B` is allocated once and reused every [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927) call.
+
+**Flag arrays**: Four `vector<uint8_t>` arrays (`ev_clique_`, `up_changed_`, `down_changed_`, `cal_changed_`) of length $|C|$ are pre-allocated. At the top of every [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927) call they are zeroed via `memset`, incurring no heap allocation.
+
+#### 4.3.4 Clique Potential Construction ([rebuild_clique_potentials](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#371-471))
+
+For each clique, the base potential is constructed by multiplying all assigned CPTs:
+
+1. A [Factor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp#8-34) of shape $[\text{scope states...}, B]$ is initialized to 1.0.
+2. For each [n_id](file:///Users/akrambatikh/Documents/projects/old_BDD_Engine/BDD_Engine/oracle/bn_path_oracle.py#2782-2790) in `assigned_cpts`:
+   - The CPT flat data for node $v$ is read from `VariableMetadata::cpt`.
+   - If the CPT size equals `fam_states` (scalar; one sample), the values are broadcast across all $B$ batch columns.
+   - If the CPT size equals `fam_states * B` (batched; one sample per batch row), values are copied directly.
+   - If the CPT size exceeds `fam_states * target_batch_size`, a `cpt_batch_offset_` slice is extracted (used when the engine passes a chunk starting at offset `k` into a larger batched CPT array).
+   - The CPT factor is multiplied into the accumulator using `Factor::multiply`.
+3. The result is stored in `clique_potentials_[i]` (heap-owned copy) and in `base_clique_potentials_[i]` (snapshot for reset).
+4. After construction, [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927) is called immediately, performing the no-evidence base calibration and storing the result in `base_up_buf_`, `base_down_buf_`, `base_cal_buf_` (the lazy copy-on-write baseline).
+
+### 4.4 Evidence Handling ([calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), evidence section)
+
+Evidence is represented as a raw `const int*` pointer set via [set_evidence_matrix(ev, num_vars)](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#501-507). The pointer is not owned; it is read only during [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927).
+
+**Single-row path (B = 1)**: For each observed variable $v$ (i.e., `ev[v] >= 0`), the method iterates over all cliques containing $v$ (via `node_in_cliques_`). For each such clique (processed at most once, guarded by `ev_clique_[ci]`):
+- The clique potential flat array is copied into a per-clique scratch buffer `ev_scratch_[ci]` (lazily sized on first use).
+- Every potential entry whose multi-dimensional coordinate for any observed variable does not match the observed state is zeroed.
+- If the sum over remaining entries is zero, `std::invalid_argument("Inconsistent evidence")` is thrown.
+- The clique potential is replaced with a new [Factor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp#8-34) wrapping the modified scratch data.
+
+**Multi-row batched path (B > 1)**: For each clique, for each observed variable dimension in the clique's scope (where at least one batch row has a non-negative observation), the flat potential array (shape `[clique_states * B]`, state-major batch-minor) is copied to `ev_scratch_[ci]`. Then for each flat potential index $f$ and each batch row $b$, if `ev[b * num_vars + nid] >= 0` and the variable's state at $f$ (from `state_of_dim[d][f]`) does not match the observation, `scratch[f * B + b]` is zeroed. The modified array replaces the clique potential. Inconsistent batch rows are not detected and remain as zero-sum rows; downstream queries on inconsistent rows return a zero distribution.
+
+### 4.5 Calibration: Message Passing ([calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927))
+
+Calibration implements the Hugin algorithm: collect, distribute, assemble.
+
+#### 4.5.1 Collect Pass (leaves → root)
+
+Each non-root clique $u$ is processed in `collect_order_`. A lazy copy-on-write (COW) shortcut applies: if `ev_clique_[u] == 0` (no evidence applied to $u$) and no child's `up_changed_` flag is set, and this is not the first calibration, the base up-message is copied directly from `base_up_buf_[u]`, skipping recomputation.
+
+Otherwise:
+
+1. **Gather-init**: For each product index $pi$ in $[0, \text{product\_states})$: `scratch[pi] = pot[pot_map[pi]]`, reading from clique $u$'s potential.
+2. **Gather-multiply children**: For each child $c_i$: `scratch[pi] *= up_msg[c_i][child_map[c_i][pi]]`.
+3. **Scatter-add → up-message**: `up_msg[u][marg_map[pi]] += scratch[pi]`, marginalizing out all variables not in the sepset with the parent.
+
+The `up_changed_[u]` flag is set.
+
+**Batched variant (B > 1)**: All operations are lifted to work on $B$-length SIMD-hinted inner loops (`#pragma omp simd`). Buffer layout is state-major, batch-minor: `buf[state * B + b]`. The gather, multiply, and scatter-add are all $O(PS \times B)$ operations.
+
+#### 4.5.2 Distribute Pass (root → leaves)
+
+Each clique is processed in `distribute_order_`. The root clique requires no down-message computation (it has no parent). For each non-root clique $u$:
+
+Lazy COW: if parent $p$'s `ev_clique_[p] == 0`, `down_changed_[p] == 0`, and no sibling's `up_changed_` flag is set, and this is not first calibration, the base down-message is restored from `base_down_buf_[u]`.
+
+Otherwise:
+
+1. **Gather-init**: `scratch[pi] = ppot[pot_map[pi]]`, reading from parent clique $p$'s potential.
+2. **Multiply parent down-message** (if $p$ is not the root): `scratch[pi] *= down_msg[p][down_map[pi]]`.
+3. **Multiply sibling up-messages**: For each sibling $s$ of $u$ (i.e., other children of $p$): `scratch[pi] *= up_msg[s][sibling_map[s][pi]]`.
+4. **Scatter-add → down-message**: `down_msg[u][marg_map[pi]] += scratch[pi]`.
+
+The `cal_changed_[u]` flag is set if `ev_clique_[u]` is set, `down_changed_[u]` is set, or any child's `up_changed_` is set.
+
+#### 4.5.3 Assemble Calibrated Potentials
+
+For each clique $i$, if `cal_changed_[i] == 0` and this is not the first calibration, the base calibrated potential is restored from `base_cal_buf_[i]`.
+
+Otherwise:
+
+1. Copy `clique_potentials_[i]` values into `cal_pot_buf_[i]`.
+2. Multiply in the parent down-message using `AssembleOp::down_map`.
+3. Multiply in each child's up-message using `AssembleOp::child_maps[ci]`.
+
+The result `cal_pot_buf_[i]` is a calibrated (but unnormalized) joint distribution over the clique's scope.
+
+#### 4.5.4 Inconsistency Check and Base Snapshot
+
+After calibration, if `B == 1` and evidence is present, the root clique's calibrated potential is summed. If the sum is zero, an exception is raised.
+
+On the first calibration (`is_first_calibration_ == true`), all message buffers and calibrated potential buffers are snapshotted into the `base_*` arrays. Subsequent calls restore from these arrays via lazy COW, recomputing only cliques affected by evidence or changed child messages.
+
+### 4.6 Query Extraction ([query_marginals_multi](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#929-1080))
+
+**Function signature**: [query_marginals_multi(query_vars, num_queries, offsets, out)](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#929-1080)
+
+**First pass**: For each query variable $q_i$, look up the assigned clique via [node_to_clique_](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#125-137) (O(1) hash lookup). Record the dimension index `node_dim` of $q_i$ within the clique scope. Zero-fill the output slice for $q_i$.
+
+**Second pass** (clique-grouped): Iterate over queries again. For each query, if its clique has not yet been visited (tracked via a pre-allocated or stack-allocated `uint8_t visited[]` array), mark it visited and perform a single linear scan over all `clique_states` entries of `cal_pot_buf_[ci]`:
+
+For **B = 1**:
+```
+for flat in [0, clique_states):
+    v = cal_pot_buf[ci][flat]
+    for each qj sharing this clique:
+        out[offsets[qj] + state_of_dim[node_dim_qj][flat]] += v
+```
+Then normalize each query's output slice by its sum.
+
+For **B > 1**: The inner loop reads `cal[flat * B + b]` and accumulates into `out[b * total_states + offsets[qj] + state]`. Each batch row's output slice is normalized independently.
+
+The clique-grouping ensures that each unique clique is scanned exactly once regardless of how many queries map to the same clique. For the common case of $\leq 64$ queries and $\leq 200$ cliques, all working memory is allocated on the stack; heap fallback occurs above these limits.
+
+---
+
+## 5. Data Structures
+
+| Structure | Module | Role |
+|-----------|--------|------|
+| [Graph](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp#10-42) | [graph.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp) | DAG + CPT storage. Adjacency lists per node. CPTs stored as flat `double` vectors. |
+| [VariableMetadata](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/node.hpp#10-18) | [node.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/node.hpp) | Per-node record: name, state labels, CPT flat array, `NodeId`. |
+| [JunctionTree](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#22-44) | [junction_tree.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp) | Compiled JT: list of [Clique](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#8-15) + [Separator](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#16-21) structs. |
+| [Clique](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp#8-15) | [junction_tree.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/junction_tree.hpp) | Scope, assigned CPT node IDs, base potential [Factor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp#8-34), neighbor list. |
+| [Factor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp#8-34) | [factor.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp) | Multi-dimensional discrete potential. Wraps [DenseTensor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/dense_tensor.cpp#5-14) (row-major flat `double*`). |
+| [DenseTensor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/dense_tensor.cpp#5-14) | [dense_tensor.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/dense_tensor.hpp) | Raw flat `double*` buffer + shape + stride metadata. |
+| [CollectOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#14-21) | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-edge (u→parent) gather/multiply/scatter maps for the collect pass. |
+| [DistributeOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#22-32) | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-edge maps for the distribute pass (parent CPT × parent down-msg × sibling msgs). |
+| [AssembleOp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#33-40) | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-clique maps for assembling calibrated beliefs from messages. |
+| [CliqueMargInfo](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#46-54) | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-clique, per-variable `uint8_t` map: `state_of_dim[d][flat] = coord`. Enables zero-allocation query extraction. |
+| `up_msg_buf_`, `down_msg_buf_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-edge message double buffers (shape `[sepset_size * B]`). |
+| `cal_pot_buf_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-clique calibrated potential (shape `[clique_states * B]`). |
+| `base_*_buf_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Lazy COW snapshots of messages and calibrated potentials from the no-evidence base calibration. |
+| `scratch_buf_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Single reused workspace for product-space gather operations. Shape `[max_product_states * B]`. |
+| `ev_clique_`, `up_changed_`, `down_changed_`, `cal_changed_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-clique `uint8_t` dirty flags; zeroed via `memset` each [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927). |
+| `ev_scratch_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | Per-clique lazily sized `double` scratch for evidence masking. |
+| [node_to_clique_](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#125-137), `node_in_cliques_` | [workspace.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp) | O(1) variable→clique lookup maps; built once at construction. |
+
+---
+
+## 6. Pseudocode
+
+```
+Algorithm: PYBNCORE_EXACT_INFERENCE
+
+=== COMPILE TIME (once per model) ===
+
+1.  G ← Graph(variables, CPTs, edges)
+2.  JT ← JunctionTreeCompiler.compile(G, heuristic="min_fill")
+        a. MoralGraph ← moralize(G)
+        b. ChordGraph ← triangulate(MoralGraph)   // min-fill elimination
+        c. Cliques ← maximal_cliques(ChordGraph)
+        d. JT ← max_spanning_tree(Cliques, weight=|sepset|)
+        e. assign_CPTs_to_cliques(JT, G)
+3.  W ← BatchWorkspace(JT, batch_size=B)
+        a. orient_tree_by_BFS(JT) → collect_order, distribute_order
+        b. For each edge u→parent(u):
+              collect_ops[u] ← precompute {pot_map, child_maps, marg_map}
+              distribute_ops[u] ← precompute {pot_map, down_map, sibling_maps, marg_map}
+              assemble_ops[u] ← precompute {down_map, child_maps}
+        c. For each clique i, each dim d:
+              state_of_dim[i][d][flat] ← decode coord d at flat index
+        d. Allocate scratch_buf[max_product_states * B]
+        e. rebuild_clique_potentials(B)   // multiply CPTs into clique pots
+        f. calibrate()                    // base (no-evidence) calibration + snapshot
+
+=== RUNTIME (per evidence / batch) ===
+
+4.  engine.evaluate_multi(evidence, B, num_vars, query_vars, Q, offsets, output)
+        a. Split B rows into ceil(B / chunk_size) chunks
+        b. For each chunk c (in parallel via std::async workers):
+              W.reset(chunk_size)        // restore base potentials
+              W.set_evidence_matrix(evidence + c*chunk_size*num_vars, num_vars)
+              W.calibrate()
+              W.query_marginals_multi(query_vars, Q, offsets, output + c*chunk_size*total_states)
+
+5.  calibrate():
+        a. memset(ev_clique, up_changed, down_changed, cal_changed, 0)
+        b. // EVIDENCE APPLICATION
+           For each observed variable v (B=1: via node_in_cliques;
+                                        B>1: per-clique via state_of_dim):
+              Copy clique potential to ev_scratch
+              Zero entries inconsistent with observation
+              Replace clique potential (B=1: throw if sum=0; B>1: leave zero rows)
+              Set ev_clique[ci] = 1
+        c. // COLLECT (leaves → root)
+           For u in collect_order:
+              if not (ev_clique[u] or any child up_changed) and not first_calibration:
+                  up_msg[u] ← base_up_msg[u]  // lazy COW
+                  continue
+              scratch[pi] ← pot[u][pot_map[pi]]
+              For each child c: scratch[pi] *= up_msg[c][child_map[c][pi]]
+              up_msg[u][marg_map[pi]] ← scatter_add(scratch)
+              up_changed[u] = 1
+        d. // DISTRIBUTE (root → leaves)
+           For u in distribute_order:
+              if root: set cal_changed[u], continue
+              if not (ev_clique[parent] or down_changed[parent] or sibling_changed)
+                      and not first_calibration:
+                  down_msg[u] ← base_down_msg[u]  // lazy COW
+              else:
+                  scratch[pi] ← ppot[pot_map[pi]]
+                  If parent has down-msg: scratch[pi] *= down_msg[parent][dm[pi]]
+                  For each sibling s: scratch[pi] *= up_msg[s][smap[pi]]
+                  down_msg[u][marg_map[pi]] ← scatter_add(scratch)
+              Set cal_changed[u] based on evidence/changed flags
+        e. // ASSEMBLE
+           For each clique i:
+              if not cal_changed[i] and not first_calibration:
+                  cal_pot[i] ← base_cal_pot[i]  // lazy COW
+              else:
+                  cal_pot[i] ← pot[i]
+                  if has_down:  cal_pot[i][pi] *= down_msg[i][dmap[pi]]
+                  for child c: cal_pot[i][pi] *= up_msg[c][cmap[pi]]
+        f. (B=1 only) If evidence and sum(cal_pot[root]) ≤ 0: throw
+        g. On first_calibration: snapshot all buffers to base_*
+
+6.  query_marginals_multi(query_vars, Q, offsets, out):
+        a. For qi in [0,Q): resolve clique_of[qi], node_dim[qi], zero output slice
+        b. For qi in [0,Q):
+              ci ← clique_of[qi]
+              if visited[ci]: continue
+              visited[ci] = 1
+              // Single scan of cal_pot[ci], distributing to all queries on this clique
+              For flat in [0, clique_states[ci]):
+                  For each qj on ci:
+                      out[b][offsets[qj] + state_of_dim[node_dim[qj]][flat]] += cal_pot[ci][flat*B+b]
+              Normalize each query output slice by sum
+```
+
+---
+
+## 7. Computational Complexity
+
+Let $C$ = number of cliques, $w$ = maximum clique state count (treewidth-controlled), $Q$ = number of query variables, $B$ = batch size, $T$ = number of threads.
+
+| Phase | Cost |
+|-------|------|
+| Junction tree compilation | $O(N^2)$ to $O(N^3)$ depending on triangulation algorithm, where $N$ = number of variables. Run once. |
+| [build_message_schedule](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#138-321) (per workspace) | $O(C \cdot w^2)$ for index map construction. Run once at construction and on topology change. |
+| [rebuild_clique_potentials](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#371-471) | $O(C \cdot w \cdot B)$. Run once at construction; subsequent resets via snap restore run in $O(C \cdot w)$. |
+| [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927) — collect + distribute | $O(C \cdot PS_\text{max} \cdot B)$ where $PS_\text{max} \leq w^2$ is the maximum product state space size over all edges. In the lazy COW case, only evidence-affected cliques are recomputed; for sparse evidence this is a small fraction of $C$. |
+| [query_marginals_multi](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#929-1080) | $O(w \cdot Q \cdot B)$ in the worst case (each clique scanned once, with $Q$ queries accumulated per entry). Clique grouping ensures each clique is scanned at most once. |
+| Full pipeline (B rows, T threads) | $O\!\left(\frac{B}{T} \cdot C \cdot PS_\text{max}\right)$ for the runtime phase, plus $O(C \cdot w^2)$ compile-time overhead. |
+
+**Dominant cost in practice**: the collect and distribute passes over all $C$ cliques, each proportional to the product state space of the edge's combined scope. This is bounded by $w^2$ per edge where $w$ is the maximum clique states.
+
+**Lazy COW impact**: when evidence is sparse (few observed variables), only a minority of cliques have `ev_clique` or `changed` flags set, reducing effective recomputation cost proportionally.
+
+---
+
+## 8. Assumptions, Approximations, and Limitations
+
+### 8.1 What is exact
+- Inference over the compiled JT is exact. Given a fixed triangulation and CPTs, the computed marginals are numerically identical to exact brute-force marginalization up to floating-point rounding.
+- Normalization is performed at query extraction time (not during belief propagation), so unnormalized beliefs are accumulated throughout; only the final per-query sum-normalize step introduces any numerical compression.
+
+### 8.2 What depends on discretization
+- The solver is inherently discrete. Continuous variables must be discretized externally before model construction. The optional `discretization::Manager` module (not part of the inference algorithm) handles this, but it introduces approximation. The solver itself performs no discretization.
+- State counts are read directly from `VariableMetadata::states.size()`. No check on minimum state counts is performed (a variable with one state is degenerate but not rejected).
+
+### 8.3 What is approximate
+- **Nothing within the inference proper**: message passing is exact.
+- **Triangulation heuristic**: min-fill does not guarantee minimum treewidth. Sub-optimal triangulations produce larger cliques and higher per-calibration cost, but the results remain exact.
+- **Floating-point arithmetic**: all computation uses `double` (64-bit IEEE 754). For networks with long chains of CPT multiplications, accumulated round-off error can reach $O(10^{-12})$ per entry. No compensated summation is used.
+
+### 8.4 Limitations
+- **Treewidth**: runtime is exponential in the JT treewidth. Networks with treewidth $> 25$–30 are typically intractable.
+- **Hard evidence only**: the solver applies hard (deterministic) evidence by zeroing inconsistent potential entries. Soft (likelihood) evidence is not natively supported through the public API.
+- **CPT geometry validation**: a mismatch between CPT size and `fam_states * B` raises `std::invalid_argument`. No automatic shape inference is performed.
+- **Evidence scope**: evidence is indexed by `NodeId` (integer). Variable not present in any clique — which would indicate a triangulation bug — triggers silent skip via the `node_in_cliques_` lookup guard.
+- **Inconsistent batch rows (B > 1)**: for multi-row batches, inconsistent evidence rows are silently zeroed; no exception is raised. The caller must detect zero-sum output distributions.
+- **Thread safety**: each [BatchWorkspace](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#57-58) instance is not thread-safe. The [BatchExecutionEngine](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/engine.hpp#12-38) allocates one workspace per worker thread.
+
+---
+
+## 9. Mapping from Code Modules to Algorithm Stages
+
+| Algorithm Stage | Primary File(s) | Key Symbol |
+|-----------------|----------------|------------|
+| Graph construction | [graph.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/graph/graph.hpp), `graph.cpp` | `Graph::add_variable`, `Graph::set_cpt` |
+| DAG moralization | [compiler.hpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/compiler.hpp), [compiler.cpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/compiler.cpp) | `JunctionTreeCompiler::moralize` |
+| Triangulation + JT construction | [compiler.cpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/compiler.cpp) | `JunctionTreeCompiler::compile` |
+| CPT assignment to cliques | [compiler.cpp](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/compiler.cpp) | `Clique::assigned_cpts` |
+| Tree orientation + traversal orders | `workspace.cpp:97–118` | `BatchWorkspace::BatchWorkspace` (BFS loop) |
+| Index map pre-computation | `workspace.cpp:184–287` | [build_message_schedule](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#138-321), [build_pot_map_u32](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#36-61), [build_marg_map_u32](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#62-85) |
+| Query extraction maps | `workspace.cpp:293–311` | [CliqueMargInfo](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#46-54), [build_message_schedule](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#138-321) |
+| Clique potential construction | `workspace.cpp:371–469` | [rebuild_clique_potentials](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#371-471) |
+| Lazy COW base snapshot | `workspace.cpp:360–368` | [snapshot_base_potentials](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#357-370) |
+| Evidence application (B=1) | `workspace.cpp:525–593` | [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), point-mode evidence block |
+| Evidence application (B>1) | `workspace.cpp:594–653` | [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), batched evidence block |
+| Collect pass | `workspace.cpp:656–792` | [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), collect section |
+| Distribute pass | `workspace.cpp:683–866` | [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), distribute section |
+| Assemble calibrated potentials | `workspace.cpp:722–906` | [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), assemble section |
+| Inconsistency detection | `workspace.cpp:909–913` | [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927), global inconsistency check |
+| Query extraction | `workspace.cpp:937–1079` | [query_marginals_multi](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#929-1080) |
+| Single-variable backward compat | `workspace.cpp:1085–1094` | [query_marginal](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#1082-1095) |
+| Chunked batch execution | `engine.cpp:56–116` | `BatchExecutionEngine::evaluate_multi` |
+| Thread pool dispatch | `engine.cpp:119–142` | `std::async` futures loop |
+| Workspace cache (single-chunk fast path) | `engine.cpp:75–96` | `single_workspace_cache_` |
+
+---
+
+## 10. Design Rationale
+
+**Why a pre-compiled workspace?** The dominant cost in repeat inference (e.g., UQ with many evidence samples) is the message passing, not index computation. By pre-computing all gather/scatter index maps at construction time ([build_message_schedule](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#138-321)), each [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927) call reduces to flat-array reads and multiply-accumulate loops with no runtime stride arithmetic, no temporary [Factor](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/factors/factor.hpp#8-34) allocations, and no scope set-intersection.
+
+**Why uint32_t index maps instead of on-the-fly stride arithmetic?** Address computation for multi-dimensional tensor indexing requires division and modulo operations. These are replaced by a single array dereference per product index, improving CPU cache utilization and enabling auto-vectorization of the inner loops.
+
+**Why lazy copy-on-write?** In the UQ use case, evidence is sparse: only a few variables are observed per sample. Most cliques are not touched by evidence. The COW mechanism avoids re-propagating messages through the entire tree for each new evidence set; only the subtrees rooted at evidence-adjacent cliques are recomputed.
+
+**Why `uint8_t` dirty flags instead of `vector<bool>`?** `vector<bool>` is bit-packed and not byte-addressable. `memset` on a `uint8_t` vector clears all $C$ flags in a single cache-line-efficient store. Individual flag reads and writes are single-byte operations, eliminating bit-masking overhead in the hot loop bodies.
+
+**Why chunk-level parallelism instead of intra-clique SIMD?** Each [calibrate()](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927) call is not parallelizable internally without synchronization (the collect and distribute passes are inherently sequential along the tree). Parallelism is achieved by running independent [BatchWorkspace](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/include/bncore/inference/workspace.hpp#57-58) instances on different evidence rows simultaneously via `std::async`, one workspace per thread, with no shared mutable state.
+
+**Why normalize at query time, not during propagation?** Normalizing calibrated potentials during propagation would require an additional pass and arithmetic. Since the query returns a marginal over a single variable, normalization is performed cheaply on the output slice (at most a few dozen states) at extraction time. This avoids modifying the calibrated potentials, which are shared across multiple query calls.
+
+**Why force chunk_size = 1 for the hotpath dispatch?** The workspace's internal message-passing kernels and gather maps are designed for a single evidence row (B=1). Introducing a native batched workspace (B>1 within [calibrate](file:///Users/akrambatikh/Documents/projects/Libraries/BN%20C++/bncore/src/workspace.cpp#511-927)) would require separate buffer layouts, additional index arithmetic, and more complex COW logic. The engine achieves multi-sample throughput by dispatching multiple B=1 workspaces in parallel across threads, reusing the proven single-row code path without modification.
