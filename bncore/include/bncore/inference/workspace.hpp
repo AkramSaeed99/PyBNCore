@@ -56,7 +56,7 @@ class BatchWorkspace {
 public:
   explicit BatchWorkspace(const JunctionTree &jt, std::size_t batch_size = 1);
 
-  void reset(std::size_t new_batch_size);
+  void reset(std::size_t new_batch_size, std::size_t cpt_batch_offset = 0);
 
   void set_evidence_matrix(const int *evidence_matrix, std::size_t num_vars);
   void clear_evidence();
@@ -75,15 +75,20 @@ public:
 
 private:
   void rebuild_clique_potentials(std::size_t target_batch_size);
+  void resize_runtime_buffers(std::size_t target_batch_size);
   void snapshot_base_potentials();
   void build_node_to_clique_map();
   void build_message_schedule();
 
   const JunctionTree &jt_;
   std::size_t batch_size_;
+  std::size_t cpt_batch_offset_ = 0;
 
   std::vector<Factor> clique_potentials_;
   std::vector<Factor> base_clique_potentials_;
+  std::size_t base_batch_size_ = 0;
+  std::size_t base_batch_offset_ = 0;
+  bool base_depends_on_offset_ = false;
   const int *evidence_matrix_ = nullptr;
   std::size_t evidence_num_vars_ = 0;
 
@@ -106,9 +111,18 @@ private:
   std::vector<AssembleOp>   assemble_ops_;
 
   // P1: Persistent scratch buffer — sized to max product_states at construction,
-  // reused every calibrate() with zero heap allocation in the hot path.
+  // then resized as max_product_states * batch_size for runtime chunk geometry.
+  // Reused every calibrate() with zero heap allocation in the hot path.
   std::vector<double> scratch_buf_;
   std::size_t max_product_states_ = 0;
+
+  // Phase-A: workspace-owned uint8_t scratch flags — pre-sized at construction,
+  // cleared via memset at top of calibrate() with ZERO heap allocation.
+  // Using uint8_t instead of vector<bool>: byte-addressable, not bit-packed.
+  std::vector<uint8_t> ev_clique_;    // did evidence touch this clique?
+  std::vector<uint8_t> up_changed_;   // did up_msg change in collect?
+  std::vector<uint8_t> down_changed_; // did down_msg change in distribute?
+  std::vector<uint8_t> cal_changed_;  // does assembled cal_pot need update?
 
   // Calibrated potentials
   std::vector<std::vector<double>> cal_pot_buf_;
@@ -132,6 +146,9 @@ private:
   // O(1) lookups
   std::unordered_map<NodeId, std::size_t> node_to_clique_;
   std::unordered_map<NodeId, std::vector<std::size_t>> node_in_cliques_;
+
+  // Query-time scratch for safe fallback when clique count exceeds stack guard.
+  mutable std::vector<uint8_t> query_visited_scratch_;
 };
 
 } // namespace bncore

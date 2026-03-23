@@ -50,16 +50,36 @@ void Graph::set_cpt(NodeId id, const std::vector<double> &cpt) {
   if (id >= variables_.size())
     throw std::out_of_range("Invalid NodeId");
 
-  std::size_t expected = variables_[id].states.size();
+  std::size_t family_states = variables_[id].states.size();
   for (NodeId p : parents_[id]) {
-    expected *= variables_[p].states.size();
+    family_states *= variables_[p].states.size();
   }
 
-  if (cpt.size() != expected) {
-    throw std::invalid_argument("CPT size mismatch for variable " +
-                                variables_[id].name + ". Expected " +
-                                std::to_string(expected) + " but got " +
-                                std::to_string(cpt.size()));
+  if (cpt.empty()) {
+    throw std::invalid_argument("CPT for variable '" + variables_[id].name +
+                                "' cannot be empty. Expected scalar size " +
+                                std::to_string(family_states) +
+                                " or batched size " +
+                                std::to_string(family_states) + " * B.");
+  }
+
+  if (cpt.size() == family_states) {
+    variables_[id].cpt = cpt;
+    return;
+  }
+
+  if (cpt.size() % family_states != 0) {
+    throw std::invalid_argument(
+        "CPT size mismatch for variable '" + variables_[id].name +
+        "'. Expected scalar size " + std::to_string(family_states) +
+        " or batched size " + std::to_string(family_states) +
+        " * B (B > 0), but got " + std::to_string(cpt.size()) + ".");
+  }
+
+  std::size_t batch_size = cpt.size() / family_states;
+  if (batch_size == 0) {
+    throw std::invalid_argument("CPT for variable '" + variables_[id].name +
+                                "' has invalid batch size 0.");
   }
 
   variables_[id].cpt = cpt;

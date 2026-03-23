@@ -13,7 +13,8 @@ namespace bncore {
 BatchExecutionEngine::BatchExecutionEngine(const JunctionTree &jt,
                                            std::size_t num_threads,
                                            std::size_t chunk_size)
-    : jt_(jt), num_threads_(num_threads), chunk_size_(chunk_size) {
+    : jt_(jt), num_threads_(num_threads),
+      chunk_size_(std::max<std::size_t>(1, chunk_size)) {
   if (num_threads_ == 0)
     num_threads_ = std::thread::hardware_concurrency();
   if (num_threads_ == 0)
@@ -53,6 +54,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
   }
 
   std::size_t num_chunks = (batch_size + chunk_size_ - 1) / chunk_size_;
+
   // P2: Use query_marginals_multi — single clique scan for all queries,
   // with pre-baked state_of_dim maps (no Factor::marginalize allocation).
   // Convert size_t query_vars to NodeId (uint32_t) once here.
@@ -61,8 +63,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
     qvars_nodeid[i] = static_cast<bncore::NodeId>(query_vars[i]);
 
   auto write_query_outputs = [&](BatchWorkspace &workspace,
-                                 std::size_t current_batch_start,
-                                 std::size_t current_chunk_size) {
+                                 std::size_t current_batch_start) {
     double *out_row = output_data + current_batch_start * total_states;
     workspace.query_marginals_multi(qvars_nodeid.data(), num_queries,
                                     output_offsets, out_row);
@@ -79,7 +80,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
           std::make_unique<BatchWorkspace>(jt_, current_chunk_size);
       single_workspace_batch_size_ = current_chunk_size;
     } else {
-      single_workspace_cache_->reset(current_chunk_size);
+      single_workspace_cache_->reset(current_chunk_size, 0);
     }
 
     BatchWorkspace &workspace = *single_workspace_cache_;
@@ -90,7 +91,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
       workspace.clear_evidence();
     }
     workspace.calibrate();
-    write_query_outputs(workspace, /*current_batch_start=*/0, current_chunk_size);
+    write_query_outputs(workspace, /*current_batch_start=*/0);
     return;
   }
 
@@ -102,7 +103,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
       std::size_t current_chunk_size =
           std::min(chunk_size_, batch_size - current_batch_start);
 
-      workspace.reset(current_chunk_size);
+      workspace.reset(current_chunk_size, current_batch_start);
 
       const int *chunk_evidence =
           evidence_data ? (evidence_data + current_batch_start * num_vars)
@@ -111,7 +112,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
         workspace.set_evidence_matrix(chunk_evidence, num_vars);
 
       workspace.calibrate();
-      write_query_outputs(workspace, current_batch_start, current_chunk_size);
+      write_query_outputs(workspace, current_batch_start);
     }
   };
 
