@@ -72,3 +72,19 @@ bin/
 
 # User generated
 .gemini/
+
+# Benchmark compiled binaries (no extension, built in-place)
+bncore/benchmarks/benchmark_smile
+bncore/benchmarks/benchmark_smile_epistemic
+bncore/benchmarks/benchmark_smile_vector
+bncore/benchmarks/benchmark_pybncore_point
+bncore/benchmarks/smile_bench_full
+bncore/benchmarks/pybncore_native_bench
+
+# Benchmark run outputs
+bncore/benchmarks/results/
+bncore/benchmarks/*.txt
+bncore/benchmarks/*.png
+
+# Resolved merge artifacts
+*.resolved

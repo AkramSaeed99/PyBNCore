@@ -7,9 +7,17 @@
 #include <string>
 #include <vector>
 
+static std::string trim_ascii(std::string s) {
+  const char *ws = " \t\r\n";
+  const auto begin = s.find_first_not_of(ws);
+  if (begin == std::string::npos) return std::string();
+  const auto end = s.find_last_not_of(ws);
+  return s.substr(begin, end - begin + 1);
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
-    std::cerr << "Usage: ./benchmark_smile_vector <xdsl_file> <evidence_csv>\n";
+    std::cerr << "Usage: ./benchmark_smile_vector <xdsl_file> <evidence_csv> [target_node]\n";
     return 1;
   }
 
@@ -30,6 +38,7 @@ int main(int argc, char **argv) {
 
   std::vector<int> evidence_nodes;
   while (std::getline(ss, token, ',')) {
+    token = trim_ascii(token);
     int handle = net.FindNode(token.c_str());
     if (handle < 0) {
       std::cerr << "Error: Node " << token << " not found in network.\n";
@@ -44,13 +53,18 @@ int main(int argc, char **argv) {
     std::stringstream css(line);
     std::string val;
     while (std::getline(css, val, ',')) {
-      row.push_back(std::stoi(val));
+      row.push_back(std::stoi(trim_ascii(val)));
     }
     evidence_matrix.push_back(row);
   }
 
   int batch_size = evidence_matrix.size();
-  int target_node = net.FindNode("L9_N9"); // Assuming 10x10 DAG target
+  const char *target_name = (argc >= 4) ? argv[3] : "L9_N9";
+  int target_node = net.FindNode(target_name);
+  if (target_node < 0) {
+    std::cerr << "Error: target node '" << target_name << "' not found.\n";
+    return 1;
+  }
 
   std::cout << "SMILE C++ Loaded " << batch_size << " evidence scenarios.\n";
 

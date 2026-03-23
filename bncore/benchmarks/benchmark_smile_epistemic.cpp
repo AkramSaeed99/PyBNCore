@@ -8,7 +8,7 @@
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::cerr
-        << "Usage: ./benchmark_smile_epistemic <xdsl_file> <batch_size>\n";
+        << "Usage: ./benchmark_smile_epistemic <xdsl_file> <batch_size> [target_node]\n";
     return 1;
   }
 
@@ -61,7 +61,12 @@ int main(int argc, char **argv) {
     }
   }
 
-  int target_node = net.FindNode("L9_N9");
+  const char *target_name = (argc >= 4) ? argv[3] : "L9_N9";
+  int target_node = net.FindNode(target_name);
+  if (target_node < 0) {
+    std::cerr << "Error: target node '" << target_name << "' not found.\n";
+    return 1;
+  }
 
   // Start benchmark
   auto t0 = std::chrono::high_resolution_clock::now();
