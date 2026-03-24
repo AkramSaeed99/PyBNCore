@@ -41,6 +41,10 @@ NB_MODULE(_core, m) {
            nb::overload_cast<const std::string &>(&bncore::Graph::get_variable,
                                                   nb::const_),
            nb::arg("name"))
+      .def("get_variable",
+           nb::overload_cast<bncore::NodeId>(&bncore::Graph::get_variable,
+                                             nb::const_),
+           nb::arg("id"))
       .def("get_parents", &bncore::Graph::get_parents, nb::arg("id"))
       .def("get_children", &bncore::Graph::get_children, nb::arg("id"))
       .def("num_variables", &bncore::Graph::num_variables)

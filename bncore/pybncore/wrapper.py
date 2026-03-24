@@ -38,16 +38,20 @@ class PyBNCoreWrapper:
         self._compile()
 
     def _cache_metadata(self) -> None:
-        self._node_names = list(self._cpts.keys())
+        self._node_names.clear()
         self._name_to_id.clear()
         self._id_to_name.clear()
         self._node_states.clear()
         
-        for name in self._node_names:
-            meta = self._graph.get_variable(name)
-            self._name_to_id[name] = meta.id
-            self._id_to_name[meta.id] = name
-            self._node_states[name] = list(meta.states)
+        if self._graph is not None:
+            num_vars = self._graph.num_variables()
+            for i in range(num_vars):
+                meta = self._graph.get_variable(i)
+                name = meta.name
+                self._node_names.append(name)
+                self._name_to_id[name] = meta.id
+                self._id_to_name[meta.id] = name
+                self._node_states[name] = list(meta.states)
 
     def _compile(self) -> None:
         # Keep the compiled junction tree alive for the entire engine lifetime.
@@ -57,7 +61,124 @@ class PyBNCoreWrapper:
         self._is_compiled = True
         
     def nodes(self) -> List[str]:
-        return self._node_names.copy()
+        return [n for n in self._node_names if not n.startswith("__")]
+
+    def add_noisy_max(self, node: str, states: List[str], parents: List[str],
+                      link_matrices: Dict[str, np.ndarray], leak_probs: np.ndarray) -> None:
+        """
+        Synthesizes a Noisy-MAX node using Parent Divorcing to keep exact inference fast O(n).
+        Adds hidden variables to the underlying `_graph` instead of an exponential CPT.
+        
+        Args:
+            node: Name of the child node.
+            states: Ordered states of the child node (lowest effect/leak first, highest last).
+            parents: Ordered list of parent names (must already exist in the graph).
+            link_matrices: Dict mapping parent_name -> 2D array of shape (parent_states, child_states)
+                           where row i is the probability distribution over child states given parent state i.
+            leak_probs: 1D array of shape (child_states) representing the background leak distribution.
+        """
+        if self._graph is None:
+            self._graph = Graph()
+            
+        n_states = len(states)
+        
+        parent_cardinalities = []
+        for p in parents:
+            if p not in self._node_names:
+                raise ValueError(f"Parent '{p}' does not exist in the graph.")
+            meta = self._graph.get_variable(p)
+            parent_cardinalities.append(len(meta.states))
+            
+        leak_name = f"__{node}_Z_leak"
+        self._graph.add_variable(leak_name, states)
+        self._cpts[leak_name] = np.array(leak_probs, dtype=np.float64)
+        
+        last_m = leak_name
+        
+        for i, p in enumerate(parents):
+            z_name = f"__{node}_Z_{p}"
+            self._graph.add_variable(z_name, states)
+            self._graph.add_edge(p, z_name)
+            
+            matrix = np.asarray(link_matrices[p], dtype=np.float64)
+            if matrix.shape != (parent_cardinalities[i], n_states):
+                raise ValueError(f"Link matrix for parent '{p}' has shape {matrix.shape}, expected ({parent_cardinalities[i]}, {n_states})")
+            
+            self._cpts[z_name] = matrix.flatten()
+            
+            is_last = (i == len(parents) - 1)
+            m_name = node if is_last else f"__{node}_M_{p}"
+            
+            if is_last:
+                self._graph.add_variable(node, states)
+            else:
+                self._graph.add_variable(m_name, states)
+                
+            self._graph.add_edge(last_m, m_name)
+            self._graph.add_edge(z_name, m_name)
+            
+            max_cpt = np.zeros((n_states, n_states, n_states), dtype=np.float64)
+            for a in range(n_states):
+                for b in range(n_states):
+                    max_cpt[a, b, max(a, b)] = 1.0
+                    
+            self._cpts[m_name] = max_cpt.flatten()
+            last_m = m_name
+            
+        for n, cpt in self._cpts.items():
+            if n.startswith(f"__{node}_") or n == node:
+                self._graph.set_cpt(n, cpt)
+                
+        self._cache_metadata()
+        self._is_compiled = False
+
+    def set_equation(self, node: str, expression: callable, parents: List[str]) -> None:
+        """
+        Creates a deterministic Functional Node by evaluating a Python callable over the Cartesian
+        product of its parent states.
+        
+        Args:
+            node: Name of the target node (must already have states defined).
+            expression: A Python function taking N strings and returning a string (the node's state).
+                        e.g., `lambda a, b: str(int(a) + int(b))`
+            parents: Ordered list of parent names.
+        """
+        import itertools
+        
+        if self._graph is None:
+            raise RuntimeError("Graph must be initialized before adding equations.")
+            
+        if node not in self._node_names:
+            raise KeyError(f"Target node '{node}' does not exist. Add it to graph first.")
+            
+        target_states = self._node_states[node]
+        parent_states_lists = []
+        
+        for p in parents:
+            if p not in self._node_names:
+                raise KeyError(f"Parent '{p}' does not exist.")
+            parent_states_lists.append(self._node_states[p])
+            
+        n_states = len(target_states)
+        n_rows = 1
+        for lst in parent_states_lists:
+            n_rows *= len(lst)
+            
+        cpt = np.zeros(n_rows * n_states, dtype=np.float64)
+        
+        for i, parent_combo in enumerate(itertools.product(*parent_states_lists)):
+            try:
+                res = expression(*parent_combo)
+            except Exception as e:
+                raise RuntimeError(f"Equation evaluation failed on inputs {parent_combo}: {e}")
+                
+            if res not in target_states:
+                raise ValueError(f"Equation returned '{res}', which is not a valid state for '{node}'. Valid: {target_states}")
+                
+            res_idx = target_states.index(res)
+            cpt[i * n_states + res_idx] = 1.0
+            
+        self.set_cpt(node, cpt.reshape((n_rows, n_states)))
 
     def get_outcomes(self, node: str) -> List[str]:
         return self._node_states[node]
