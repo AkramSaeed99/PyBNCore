@@ -202,6 +202,57 @@ class PyBNCoreWrapper:
     def clear_evidence(self) -> None:
         self._evidence.clear()
         
+    def set_soft_evidence(self, node: str, likelihoods: Dict[str, float]) -> None:
+        """
+        Sets soft/virtual evidence on a specific node.
+        Soft evidence scales the posterior beliefs by these likelihood factors.
+        
+        Args:
+            node: The name of the target node.
+            likelihoods: A dictionary mapping state names to likelihood values.
+                         States missing from the dictionary receive 0.0 likelihood.
+        """
+        if not self._is_compiled:
+            self._compile()
+        if node not in self._name_to_id:
+            raise ValueError(f"Unknown node '{node}'")
+        node_id = self._name_to_id[node]
+        states = self._node_states[node]
+        lvec = np.zeros(len(states), dtype=np.float64)
+        for s, v in likelihoods.items():
+            if s not in states:
+                raise ValueError(f"Unknown outcome '{s}' for node '{node}'")
+            lvec[states.index(s)] = float(v)
+        self._engine.set_soft_evidence(node_id, lvec)
+
+    def set_soft_evidence_matrix(self, node: str, matrix: np.ndarray) -> None:
+        """
+        Sets a batched soft evidence matrix for a specific node.
+        
+        Args:
+            node: The name of the target node.
+            matrix: 2D numpy array of shape (batch_size, n_states), 
+                    acting as per-row likelihood multipliers.
+        """
+        if not self._is_compiled:
+            self._compile()
+        if node not in self._name_to_id:
+            raise ValueError(f"Unknown node '{node}'")
+        arr = np.ascontiguousarray(matrix, dtype=np.float64)
+        if arr.ndim != 2:
+            raise ValueError("set_soft_evidence_matrix: must be 2D array.")
+        node_id = self._name_to_id[node]
+        if arr.shape[1] != len(self._node_states[node]):
+            raise ValueError(f"set_soft_evidence_matrix: expected {len(self._node_states[node])} columns for node '{node}'.")
+        self._engine.set_soft_evidence_matrix(node_id, arr)
+
+    def clear_soft_evidence(self) -> None:
+        """
+        Clears all previously set soft evidence and likelihoods.
+        """
+        if self._engine is not None:
+            self._engine.clear_soft_evidence()
+
     def update_beliefs(self) -> None:
         """
         Forces a calibration sequence. Used heavily by HCL mapping
@@ -230,8 +281,17 @@ class PyBNCoreWrapper:
         is_batch = evidence_matrix is not None
         
         if is_batch:
-            batch_size = evidence_matrix.shape[0]
             ev_array = np.ascontiguousarray(evidence_matrix, dtype=np.int32)
+            if ev_array.ndim != 2:
+                raise ValueError("evidence_matrix must be a 2D int32 array.")
+            if ev_array.shape[1] != len(self._name_to_id):
+                raise ValueError(
+                    f"evidence_matrix second dimension must equal number of nodes "
+                    f"({len(self._name_to_id)})."
+                )
+            batch_size = int(ev_array.shape[0])
+            if batch_size <= 0:
+                raise ValueError("evidence_matrix must contain at least one row.")
         else:
             batch_size = 1
             num_vars = len(self._name_to_id)
@@ -287,4 +347,332 @@ class PyBNCoreWrapper:
                     for i, s_label in enumerate(self._node_states[query_node])
                 }
 
+        return results
+
+    def batch_query_map(self, evidence_matrix: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        Return MAP state indices with shape (batch_size, num_nodes).
+        """
+        if not self._is_compiled:
+            self._compile()
+
+        if evidence_matrix is None:
+            ev_array = self.make_evidence_matrix(self._evidence, batch_size=1)
+        else:
+            ev_array = np.ascontiguousarray(evidence_matrix, dtype=np.int32)
+            if ev_array.ndim != 2:
+                raise ValueError("evidence_matrix must be a 2D int32 array.")
+            if ev_array.shape[1] != len(self._name_to_id):
+                raise ValueError(
+                    f"evidence_matrix second dimension must equal number of nodes "
+                    f"({len(self._name_to_id)})."
+                )
+            if ev_array.shape[0] <= 0:
+                raise ValueError("evidence_matrix must contain at least one row.")
+
+        batch_size = int(ev_array.shape[0])
+        num_nodes = len(self._name_to_id)
+        output = np.empty((batch_size, num_nodes), dtype=np.int32, order="C")
+
+        if hasattr(self._engine, "evaluate_map"):
+            self._engine.evaluate_map(ev_array, output)
+            return output
+
+        # Compatibility fallback for older native modules: marginal argmax per node.
+        query_nodes = self.nodes()
+        for b in range(batch_size):
+            row = ev_array[b : b + 1, :]
+            marginals = self.batch_query_marginals(query_nodes, evidence_matrix=row)
+            for node in query_nodes:
+                probs = np.asarray(marginals[node], dtype=np.float64)[0]
+                output[b, self._name_to_id[node]] = int(np.argmax(probs))
+        return output
+
+    def query_map(
+        self, evidence: Optional[Dict[str, Union[str, int]]] = None
+    ) -> Dict[str, str]:
+        """
+        Return MAP assignment as {node_name: state_name}.
+        """
+        if evidence is None:
+            map_idx = self.batch_query_map()[0]
+        else:
+            ev_array = self.make_evidence_matrix(evidence, batch_size=1)
+            map_idx = self.batch_query_map(ev_array)[0]
+
+        result: Dict[str, str] = {}
+        for node in self._node_names:
+            idx = int(map_idx[self._name_to_id[node]])
+            outcomes = self._node_states[node]
+            if idx < 0 or idx >= len(outcomes):
+                raise RuntimeError(
+                    f"Native MAP result produced invalid state index {idx} for node '{node}'."
+                )
+            result[node] = outcomes[idx]
+        return result
+
+    def sensitivity(
+        self,
+        query_node: str,
+        query_state: str,
+        target_node: str,
+        parent_config: Tuple[str, ...],
+        target_state: str,
+        sweep_range: np.ndarray,
+    ) -> Dict[str, np.ndarray]:
+        """
+        Computes the sensitivity of P(query_node=query_state | E) 
+        with respect to the parameter P(target_node=target_state | parent_config).
+        
+        Args:
+            query_node: The output node to observe.
+            query_state: The state of the output node.
+            target_node: The node whose CPT parameter varies.
+            parent_config: A tuple of state names for the target node's parents.
+            target_state: The specific state of the target node whose probability varies.
+            sweep_range: 1D numpy array of probabilities (0.0 to 1.0) to test.
+            
+        Returns:
+            Dictionary with keys:
+                "theta": the tested parameter values
+                "posterior": the corresponding P(query_node=query_state | E) values
+        """
+        if not self._is_compiled:
+            self._compile()
+            
+        if query_node not in self._name_to_id:
+            raise KeyError(f"Unknown query node '{query_node}'")
+        if target_node not in self._name_to_id:
+            raise KeyError(f"Unknown target node '{target_node}'")
+            
+        parents = self.parents(target_node)
+        if len(parent_config) != len(parents):
+            raise ValueError(f"parent_config length ({len(parent_config)}) does not match parents count ({len(parents)}) for {target_node}.")
+            
+        cpt_shaped = self.get_cpt_shaped(target_node).copy()
+        
+        row_idx = 0
+        stride = 1
+        for i in range(len(parents) - 1, -1, -1):
+            p = parents[i]
+            p_state = parent_config[i]
+            if p_state not in self._node_states[p]:
+                raise ValueError(f"Unknown state '{p_state}' for parent '{p}'")
+            s_idx = self._node_states[p].index(p_state)
+            row_idx += s_idx * stride
+            stride *= len(self._node_states[p])
+            
+        outcomes = self._node_states[target_node]
+        if target_state not in outcomes:
+            raise ValueError(f"Unknown target state '{target_state}' for node '{target_node}'")
+        target_state_idx = outcomes.index(target_state)
+        
+        orig_row = cpt_shaped[row_idx, :].copy()
+        orig_val = orig_row[target_state_idx]
+        
+        n_points = len(sweep_range)
+        results = np.zeros(n_points, dtype=np.float64)
+        
+        # Suppress validation on self.set_cpt inside the tight loop since standard floating drift is fine
+        for i, val in enumerate(sweep_range):
+            new_row = orig_row.copy()
+            new_row[target_state_idx] = float(val)
+            
+            rem_orig = 1.0 - orig_val
+            rem_new = 1.0 - val
+            
+            mask = np.ones(len(new_row), dtype=bool)
+            mask[target_state_idx] = False
+            
+            if rem_orig > 1e-12:
+                new_row[mask] = orig_row[mask] * (rem_new / rem_orig)
+            else:
+                n_others = np.sum(mask)
+                if n_others > 0:
+                    new_row[mask] = rem_new / n_others
+                    
+            cpt_shaped[row_idx, :] = new_row
+            self.set_cpt(target_node, cpt_shaped, validate=False)
+            
+            marginals = self.batch_query_marginals([query_node])
+            if query_node in marginals:
+                m = marginals[query_node]
+                if isinstance(m, dict):
+                    results[i] = m[query_state]
+                else:
+                    s_idx = self._node_states[query_node].index(query_state)
+                    results[i] = m[0, s_idx]
+            
+        # Restore original CPT
+        cpt_shaped[row_idx, :] = orig_row
+        self.set_cpt(target_node, cpt_shaped, validate=False)
+        
+        return {"theta": np.asarray(sweep_range), "posterior": results}
+
+    def sensitivity_ranking(
+        self, query_node: str, query_state: str, n_top: int = 10, epsilon: float = 0.05
+    ) -> List[Tuple[str, Tuple[str, ...], str, float]]:
+        """
+        Ranks all CPT parameters in the network by their local derivative
+        effect on P(query_node=query_state | E).
+        
+        Returns:
+            List of (target_node, parent_config, target_state, sensitivity_score)
+        """
+        if not self._is_compiled:
+            self._compile()
+            
+        orig_marginals = self.batch_query_marginals([query_node])
+        m = orig_marginals[query_node]
+        if isinstance(m, dict):
+            orig_p = m[query_state]
+        else:
+            s_idx = self._node_states[query_node].index(query_state)
+            orig_p = m[0, s_idx]
+            
+        rankings = []
+        
+        for node in self._node_names:
+            cpt_shaped = self.get_cpt_shaped(node).copy()
+            parents = self.parents(node)
+            states = self._node_states[node]
+            rows, card = cpt_shaped.shape
+            
+            for r in range(rows):
+                p_config = []
+                rem = r
+                stride = rows
+                for p in parents:
+                    scard = len(self._node_states[p])
+                    stride //= scard
+                    s_idx = rem // stride
+                    rem %= stride
+                    p_config.append(self._node_states[p][s_idx])
+                p_config_tuple = tuple(p_config)
+                
+                for c in range(card):
+                    orig_val = cpt_shaped[r, c]
+                    if orig_val + epsilon <= 1.0:
+                        test_val = orig_val + epsilon
+                        delta_theta = epsilon
+                    else:
+                        test_val = orig_val - epsilon
+                        delta_theta = -epsilon
+                        
+                    if test_val < 0.0:
+                        continue 
+                        
+                    new_row = cpt_shaped[r, :].copy()
+                    new_row[c] = test_val
+                    rem_orig = 1.0 - orig_val
+                    rem_new = 1.0 - test_val
+                    
+                    mask = np.ones(card, dtype=bool)
+                    mask[c] = False
+                    
+                    if rem_orig > 1e-12:
+                        new_row[mask] = cpt_shaped[r, mask] * (rem_new / rem_orig)
+                    else:
+                        n_others = np.sum(mask)
+                        if n_others > 0:
+                            new_row[mask] = rem_new / n_others
+                            
+                    test_cpt = cpt_shaped.copy()
+                    test_cpt[r, :] = new_row
+                    self.set_cpt(node, test_cpt, validate=False)
+                    
+                    new_marginals = self.batch_query_marginals([query_node])
+                    m_new = new_marginals[query_node]
+                    if isinstance(m_new, dict):
+                        new_p = m_new[query_state]
+                    else:
+                        q_idx = self._node_states[query_node].index(query_state)
+                        new_p = m_new[0, q_idx]
+                    
+                    derivative = abs((new_p - orig_p) / delta_theta)
+                    rankings.append((node, p_config_tuple, states[c], float(derivative)))
+                    
+            self.set_cpt(node, cpt_shaped, validate=False)
+            
+        rankings.sort(key=lambda x: x[3], reverse=True)
+        return rankings[:n_top]
+
+    def value_of_information(self, query_node: str, candidate_nodes: Optional[List[str]] = None) -> List[Tuple[str, float]]:
+        """
+        Computes the Value of Information (VoI) of observing each candidate node
+        with respect to the query_node, given the current evidence.
+        VoI is defined as the expected reduction in entropy:
+            VoI(V) = H(Q) - sum_s P(V=s) * H(Q | V=s)
+            
+        Returns:
+            List of (candidate_node, voi_score), sorted descending by VoI.
+        """
+        if not self._is_compiled:
+            self._compile()
+            
+        if query_node not in self._name_to_id:
+            raise KeyError(f"Unknown query node '{query_node}'")
+            
+        if candidate_nodes is None:
+            candidate_nodes = [n for n in self._node_names if n != query_node and n not in self._evidence]
+            
+        nodes_to_query = [query_node] + [v for v in candidate_nodes if v != query_node and v not in self._evidence]
+        candidate_nodes = [v for v in candidate_nodes if v not in self._evidence]
+        
+        if not candidate_nodes:
+            return []
+            
+        priors = self.batch_query_marginals(nodes_to_query)
+        q_prior = priors[query_node]
+        if isinstance(q_prior, dict):
+            q_probs = np.array([q_prior[s] for s in self._node_states[query_node]])
+        else:
+            q_probs = q_prior[0]
+            
+        q_probs_nz = q_probs[q_probs > 1e-15]
+        h_q = -np.sum(q_probs_nz * np.log2(q_probs_nz))
+        
+        if h_q < 1e-12:
+            return [(v, 0.0) for v in candidate_nodes]
+            
+        row_descriptors = []
+        total_rows = sum(len(self._node_states[v]) for v in candidate_nodes)
+        
+        ev_matrix = self.make_evidence_matrix(self._evidence, batch_size=total_rows)
+        
+        row = 0
+        for v in candidate_nodes:
+            v_prior_dict = priors[v]
+            if isinstance(v_prior_dict, dict):
+                v_probs = np.array([v_prior_dict[s] for s in self._node_states[v]])
+            else:
+                v_probs = v_prior_dict[0]
+                
+            v_id = self._name_to_id[v]
+            for s_idx in range(len(self._node_states[v])):
+                ev_matrix[row, v_id] = s_idx
+                row_descriptors.append((v, v_probs[s_idx]))
+                row += 1
+                
+        conditional_marginals = self.batch_query_marginals([query_node], evidence_matrix=ev_matrix)
+        q_cond_matrix = conditional_marginals[query_node]
+        
+        expected_h = {v: 0.0 for v in candidate_nodes}
+        for r in range(total_rows):
+            v, p_v_s = row_descriptors[r]
+            if p_v_s > 1e-15:
+                if isinstance(q_cond_matrix, np.ndarray):
+                    q_c_probs = q_cond_matrix[r, :]
+                else:
+                    q_c_probs = np.array([q_cond_matrix[s] for s in self._node_states[query_node]])
+                q_c_probs_nz = q_c_probs[q_c_probs > 1e-15]
+                h_q_cond = -np.sum(q_c_probs_nz * np.log2(q_c_probs_nz))
+                expected_h[v] += p_v_s * h_q_cond
+                
+        results = []
+        for v in candidate_nodes:
+            voi = max(0.0, float(h_q - expected_h[v]))
+            results.append((v, voi))
+                
+        results.sort(key=lambda x: x[1], reverse=True)
         return results

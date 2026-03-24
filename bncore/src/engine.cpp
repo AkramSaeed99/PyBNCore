@@ -90,6 +90,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
     } else {
       workspace.clear_evidence();
     }
+    apply_soft_evidence_to_workspace(workspace, 0, current_chunk_size);
     workspace.calibrate();
     write_query_outputs(workspace, /*current_batch_start=*/0);
     return;
@@ -111,6 +112,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
       if (chunk_evidence)
         workspace.set_evidence_matrix(chunk_evidence, num_vars);
 
+      apply_soft_evidence_to_workspace(workspace, current_batch_start, current_chunk_size);
       workspace.calibrate();
       write_query_outputs(workspace, current_batch_start);
     }
@@ -142,9 +144,142 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
   }
 }
 
+void BatchExecutionEngine::evaluate_map(const int *evidence_data,
+                                        std::size_t batch_size,
+                                        std::size_t num_vars,
+                                        int *output_states) {
+  validate_commercial_license();
+  if (!output_states) {
+    throw std::invalid_argument(
+        "BatchExecutionEngine::evaluate_map received null output buffer.");
+  }
+  if (batch_size == 0) {
+    return;
+  }
+
+  const std::size_t model_vars = jt_.graph()->num_variables();
+  if (evidence_data && num_vars < model_vars) {
+    throw std::invalid_argument(
+        "BatchExecutionEngine::evaluate_map evidence width is smaller than "
+        "the model variable count.");
+  }
+
+  const std::size_t num_chunks = (batch_size + chunk_size_ - 1) / chunk_size_;
+
+  // Fast path for repeated scalar MAP queries (B=1).
+  if (num_chunks == 1 && batch_size == 1) {
+    if (!single_workspace_cache_ || single_workspace_batch_size_ != 1) {
+      single_workspace_cache_ = std::make_unique<BatchWorkspace>(jt_, 1);
+      single_workspace_batch_size_ = 1;
+    } else {
+      single_workspace_cache_->reset(1, 0);
+    }
+
+    BatchWorkspace &workspace = *single_workspace_cache_;
+    if (evidence_data) {
+      workspace.set_evidence_matrix(evidence_data, num_vars);
+    } else {
+      workspace.clear_evidence();
+    }
+
+    apply_soft_evidence_to_workspace(workspace, 0, 1);
+    workspace.max_calibrate();
+    workspace.query_map(output_states, model_vars);
+    return;
+  }
+
+  auto worker = [&](std::size_t start_chunk, std::size_t end_chunk) {
+    BatchWorkspace workspace(jt_, 1);
+
+    for (std::size_t c = start_chunk; c < end_chunk; ++c) {
+      const std::size_t chunk_start = c * chunk_size_;
+      const std::size_t chunk_end =
+          std::min(chunk_start + chunk_size_, batch_size);
+
+      for (std::size_t row = chunk_start; row < chunk_end; ++row) {
+        workspace.reset(1, row);
+        const int *row_evidence =
+            evidence_data ? (evidence_data + row * num_vars) : nullptr;
+        if (row_evidence) {
+          workspace.set_evidence_matrix(row_evidence, num_vars);
+        } else {
+          workspace.clear_evidence();
+        }
+
+        apply_soft_evidence_to_workspace(workspace, row, 1);
+        workspace.max_calibrate();
+        workspace.query_map(output_states + row * model_vars, model_vars);
+      }
+    }
+  };
+
+  const std::size_t effective_threads =
+      std::max<std::size_t>(1, std::min(num_threads_, num_chunks));
+  if (effective_threads == 1 || num_chunks <= 1) {
+    worker(0, num_chunks);
+    return;
+  }
+
+  std::vector<std::future<void>> futures;
+  const std::size_t chunks_per_thread =
+      (num_chunks + effective_threads - 1) / effective_threads;
+
+  for (std::size_t t = 0; t < effective_threads; ++t) {
+    const std::size_t start_chunk = t * chunks_per_thread;
+    const std::size_t end_chunk =
+        std::min(start_chunk + chunks_per_thread, num_chunks);
+    if (start_chunk < end_chunk) {
+      futures.push_back(
+          std::async(std::launch::async, worker, start_chunk, end_chunk));
+    }
+  }
+
+  for (auto &f : futures) {
+    f.get();
+  }
+}
+
 void BatchExecutionEngine::invalidate_workspace_cache() {
   single_workspace_cache_.reset();
   single_workspace_batch_size_ = 0;
 }
+
+void BatchExecutionEngine::set_soft_evidence(bncore::NodeId var, const double *likelihoods, std::size_t n_states) {
+  soft_evidence_scalar_[var].assign(likelihoods, likelihoods + n_states);
+  soft_evidence_matrix_.erase(var);
+}
+
+void BatchExecutionEngine::set_soft_evidence_matrix(bncore::NodeId var, const double *likelihoods_matrix, std::size_t total_n_states) {
+  soft_evidence_matrix_[var].assign(likelihoods_matrix, likelihoods_matrix + total_n_states);
+  soft_evidence_scalar_.erase(var);
+}
+
+void BatchExecutionEngine::clear_soft_evidence() {
+  soft_evidence_scalar_.clear();
+  soft_evidence_matrix_.clear();
+}
+
+void BatchExecutionEngine::apply_soft_evidence_to_workspace(BatchWorkspace &workspace,
+                                                            std::size_t current_batch_start,
+                                                            std::size_t current_chunk_size) const {
+  workspace.clear_soft_evidence();
+  for (const auto &[nid, l_vec] : soft_evidence_scalar_) {
+    workspace.set_soft_evidence(nid, l_vec.data(), l_vec.size());
+  }
+  for (const auto &[nid, l_mat] : soft_evidence_matrix_) {
+    const std::size_t n_states = l_mat.size() / soft_evidence_matrix_.at(nid).size(); // Wait, this is wrong. Total states is what is stored.
+    // The matrix has shape (batch_size, n_states), so size = B * n_states
+    // Actually, we must derive n_states
+    const std::size_t total_elements = l_mat.size();
+    // In evaluate_multi, batch_size isn't cached. Wait, the Python side provides a (total_batch, n_states) array.
+    // How do we find n_states? It's the variable's cardinality.
+    const std::size_t n_states_var = jt_.graph()->get_variable(nid).states.size();
+    if (l_mat.size() < (current_batch_start + current_chunk_size) * n_states_var) {
+      throw std::invalid_argument("Soft evidence matrix size is too small for the batch dimensions.");
+    }
+    workspace.set_soft_evidence_matrix(nid, l_mat.data() + current_batch_start * n_states_var, n_states_var);
+  }
+}
+
 
 } // namespace bncore

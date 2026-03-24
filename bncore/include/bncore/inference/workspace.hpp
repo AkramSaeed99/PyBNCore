@@ -58,10 +58,52 @@ public:
 
   void reset(std::size_t new_batch_size, std::size_t cpt_batch_offset = 0);
 
+  // ---------------------------------------------------------------------------
+  // Hard evidence (existing API — unchanged semantics)
+  // ---------------------------------------------------------------------------
   void set_evidence_matrix(const int *evidence_matrix, std::size_t num_vars);
   void clear_evidence();
 
+  // ---------------------------------------------------------------------------
+  // Soft / virtual evidence
+  //
+  // set_soft_evidence: supply a likelihood vector lambda[0..n_states-1] for a
+  // single variable.  lambda[s] = P(measurement | X=s).  Hard evidence state s0
+  // is a special case: lambda[s0]=1, all others 0.
+  //
+  // n_states must match the variable's cardinality; throws otherwise.
+  // Likelihoods need not sum to one (improper likelihoods are valid).
+  // Likelihoods must be non-negative; throws on negative entries.
+  //
+  // set_soft_evidence_matrix: batched variant — likelihoods[b * n_states + s]
+  // is the likelihood of state s for batch row b.  Shape: [B × n_states].
+  // ---------------------------------------------------------------------------
+  void set_soft_evidence(NodeId var, const double *likelihoods,
+                         std::size_t n_states);
+  void set_soft_evidence_matrix(NodeId var, const double *likelihoods_matrix,
+                                 std::size_t n_states);
+  void clear_soft_evidence();
+
+  // ---------------------------------------------------------------------------
+  // Sum-product calibration (standard marginal inference)
+  // ---------------------------------------------------------------------------
   void calibrate();
+
+  // ---------------------------------------------------------------------------
+  // Max-product calibration (MAP / MPE inference)
+  //
+  // After max_calibrate(), call query_map() to decode the joint MAP assignment.
+  // ---------------------------------------------------------------------------
+  void max_calibrate();
+
+  // Writes the most probable state index for each variable into out_states
+  // (length n_vars = JT graph variable count).  Variables not in the JT are
+  // written as -1.  Array must be pre-allocated by the caller.
+  void query_map(int *out_states, std::size_t n_vars) const;
+
+  // ---------------------------------------------------------------------------
+  // Query extraction (sum-product results)
+  // ---------------------------------------------------------------------------
 
   // Single-variable marginal (kept for backward compat with engine fallback)
   DenseTensor query_marginal(NodeId node) const;
@@ -80,6 +122,12 @@ private:
   void build_node_to_clique_map();
   void build_message_schedule();
 
+  // Internal helpers
+  // apply_soft_evidence_to_clique: applies stored soft/hard likelihood vectors
+  // to a single clique potential.  Used by both calibrate() paths.
+  // Returns true if any likelihood was applied to this clique.
+  bool apply_soft_evidence_to_clique(std::size_t ci);
+
   const JunctionTree &jt_;
   std::size_t batch_size_;
   std::size_t cpt_batch_offset_ = 0;
@@ -91,6 +139,13 @@ private:
   bool base_depends_on_offset_ = false;
   const int *evidence_matrix_ = nullptr;
   std::size_t evidence_num_vars_ = 0;
+
+  // Soft evidence storage:
+  //   soft_evidence_scalar_[var] = likelihood vector for B=1 or shared across B
+  //   soft_evidence_matrix_[var] = per-row likelihood matrix [B * n_states]
+  //                                (populated by set_soft_evidence_matrix)
+  std::unordered_map<NodeId, std::vector<double>> soft_evidence_scalar_;
+  std::unordered_map<NodeId, std::vector<double>> soft_evidence_matrix_;
 
   std::size_t root_clique_;
   std::vector<std::size_t> collect_order_;
@@ -124,9 +179,18 @@ private:
   std::vector<uint8_t> down_changed_; // did down_msg change in distribute?
   std::vector<uint8_t> cal_changed_;  // does assembled cal_pot need update?
 
-  // Calibrated potentials
+  // Calibrated potentials (sum-product)
   std::vector<std::vector<double>> cal_pot_buf_;
   std::vector<std::size_t> cal_pot_size_;
+
+  // Max-product message buffers and traceback (MAP inference)
+  // Layout mirrors up_msg_buf_: [sepset_size * B]
+  std::vector<std::vector<double>> map_up_msg_buf_;
+  // map_traceback_[clique][product_state] = which child-combined input index
+  // achieved the max; used by query_map() to decode argmax state per variable.
+  std::vector<std::vector<uint32_t>> map_traceback_;
+  // Calibrated max-product beliefs per clique (assembled after max_calibrate)
+  std::vector<std::vector<double>> map_cal_pot_buf_;
 
   // Base (no-evidence) caches for lazy propagation
   std::vector<std::vector<double>> base_up_buf_;

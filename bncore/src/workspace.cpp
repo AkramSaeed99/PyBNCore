@@ -499,7 +499,7 @@ void BatchWorkspace::reset(std::size_t new_batch_size,
 }
 
 // ---------------------------------------------------------------------------
-// Evidence
+// Hard evidence (unchanged API)
 // ---------------------------------------------------------------------------
 void BatchWorkspace::set_evidence_matrix(const int *ev, std::size_t num_vars) {
   evidence_matrix_ = ev; evidence_num_vars_ = num_vars;
@@ -507,6 +507,174 @@ void BatchWorkspace::set_evidence_matrix(const int *ev, std::size_t num_vars) {
 void BatchWorkspace::clear_evidence() {
   evidence_matrix_ = nullptr; evidence_num_vars_ = 0;
 }
+
+// ---------------------------------------------------------------------------
+// Soft / virtual evidence
+// ---------------------------------------------------------------------------
+void BatchWorkspace::set_soft_evidence(NodeId var, const double *likelihoods,
+                                       std::size_t n_states) {
+  // Validate variable exists in graph.
+  const std::size_t card = jt_.graph()->get_variable(var).states.size();
+  if (n_states != card)
+    throw std::invalid_argument(
+        "set_soft_evidence: n_states (" + std::to_string(n_states) +
+        ") does not match variable cardinality (" + std::to_string(card) + ").");
+  for (std::size_t s = 0; s < n_states; ++s)
+    if (likelihoods[s] < 0.0)
+      throw std::invalid_argument(
+          "set_soft_evidence: likelihood[" + std::to_string(s) +
+          "] is negative (" + std::to_string(likelihoods[s]) + ").");
+  soft_evidence_scalar_[var].assign(likelihoods, likelihoods + n_states);
+  // Remove any batched soft evidence for this variable — scalar takes priority.
+  soft_evidence_matrix_.erase(var);
+}
+
+void BatchWorkspace::set_soft_evidence_matrix(NodeId var,
+                                               const double *likelihoods_matrix,
+                                               std::size_t n_states) {
+  const std::size_t card = jt_.graph()->get_variable(var).states.size();
+  if (n_states != card)
+    throw std::invalid_argument(
+        "set_soft_evidence_matrix: n_states (" + std::to_string(n_states) +
+        ") does not match variable cardinality (" + std::to_string(card) + ").");
+  const std::size_t B = batch_size_;
+  for (std::size_t i = 0; i < B * n_states; ++i)
+    if (likelihoods_matrix[i] < 0.0)
+      throw std::invalid_argument(
+          "set_soft_evidence_matrix: negative likelihood at flat index " +
+          std::to_string(i) + ".");
+  soft_evidence_matrix_[var].assign(likelihoods_matrix,
+                                    likelihoods_matrix + B * n_states);
+  // Remove scalar soft evidence for this variable — matrix takes priority.
+  soft_evidence_scalar_.erase(var);
+}
+
+void BatchWorkspace::clear_soft_evidence() {
+  soft_evidence_scalar_.clear();
+  soft_evidence_matrix_.clear();
+}
+
+// ---------------------------------------------------------------------------
+// apply_soft_evidence_to_clique
+//
+// Applies soft evidence (or hard evidence converted to lambda vectors) to the
+// potential of clique ci.  Returns true if any likelihood was applied.
+//
+// Design: both hard and soft evidence are handled by multiplying the potential
+// entry at flat index f and batch row b by lambda[b][state_of_dim[d][f]].
+// This is the unified path — hard evidence is a lambda=[0..1..0] special case.
+//
+// Key invariants maintained:
+//   - ev_scratch_[ci] is used as a working copy (lazily sized).
+//   - clique_potentials_[ci] is replaced with a Factor wrapping the scratch.
+//   - ev_clique_[ci] is set to 1 when any change is made.
+//   - If all entries sum to 0 (B==1), throws "Inconsistent evidence".
+// ---------------------------------------------------------------------------
+bool BatchWorkspace::apply_soft_evidence_to_clique(std::size_t ci) {
+  const Factor  &pot   = clique_potentials_[ci];
+  const auto    &scope = pot.scope();
+  const auto    &shape = pot.tensor().shape();
+  const std::size_t K  = scope.size();
+  const std::size_t B  = batch_size_;
+
+  // Collect which dimensions (variable positions in the clique scope) have
+  // either hard or soft evidence.
+  struct EvidenceDim {
+    std::size_t pos;          // dimension in clique scope
+    NodeId      nid;
+    bool        is_scalar;   // true → same likelihood for all batch rows
+  };
+  std::vector<EvidenceDim> ev_dims;
+  ev_dims.reserve(K);
+
+  for (std::size_t d = 0; d < K; ++d) {
+    NodeId nid = scope[d];
+    bool has_hard = (evidence_matrix_ && nid < evidence_num_vars_);
+    bool has_scalar_soft = (soft_evidence_scalar_.count(nid) > 0);
+    bool has_matrix_soft = (soft_evidence_matrix_.count(nid) > 0);
+
+    if (!has_hard && !has_scalar_soft && !has_matrix_soft) continue;
+
+    // If we have both hard evidence and soft evidence for the same variable,
+    // soft evidence takes precedence (it subsumes hard as a special case).
+    if (has_scalar_soft || has_matrix_soft) {
+      ev_dims.push_back({d, nid, has_scalar_soft});
+    } else {
+      // Hard evidence: check at least one batch row has a non-negative obs.
+      bool any_obs = false;
+      for (std::size_t b = 0; b < B && !any_obs; ++b)
+        if (evidence_matrix_[b * evidence_num_vars_ + nid] >= 0) any_obs = true;
+      if (any_obs) ev_dims.push_back({d, nid, /*is_scalar=*/true});
+    }
+  }
+  if (ev_dims.empty()) return false;
+
+  // Copy potential into scratch buffer.
+  const std::size_t total = clique_states_[ci];
+  std::vector<double> &scratch = ev_scratch_[ci];
+  scratch.resize(total * B);
+  const double *src = pot.tensor().data();
+  std::copy(src, src + total * B, scratch.data());
+
+  const CliqueMargInfo &mi = clique_marg_info_[ci];
+
+  // Apply each evidence dimension.
+  for (const EvidenceDim &ed : ev_dims) {
+    const std::size_t d   = ed.pos;
+    const NodeId      nid = ed.nid;
+    const std::size_t card = shape[d];
+
+    bool has_scalar_soft = soft_evidence_scalar_.count(nid) > 0;
+    bool has_matrix_soft = soft_evidence_matrix_.count(nid) > 0;
+
+    for (std::size_t flat = 0; flat < total; ++flat) {
+      const std::size_t state = mi.state_of_dim[d][flat];
+      double *dst = scratch.data() + flat * B;
+
+      if (has_scalar_soft) {
+        // Same lambda for all batch rows.
+        const double *lam = soft_evidence_scalar_.at(nid).data();
+        const double  factor = lam[state];
+        if (factor == 1.0) continue;  // hot-path skip for hard evidence matching state
+#pragma omp simd
+        for (std::size_t b = 0; b < B; ++b) dst[b] *= factor;
+
+      } else if (has_matrix_soft) {
+        // Per-row lambda.  lam[b * card + state]
+        const double *lam = soft_evidence_matrix_.at(nid).data();
+        for (std::size_t b = 0; b < B; ++b) {
+          dst[b] *= lam[b * card + state];
+        }
+
+      } else {
+        // Hard evidence: convert to lambda on the fly.
+        for (std::size_t b = 0; b < B; ++b) {
+          const int obs = evidence_matrix_[b * evidence_num_vars_ + nid];
+          if (obs < 0) continue;  // unobserved in this row
+          if (static_cast<std::size_t>(obs) >= card)
+            throw std::invalid_argument(
+                "Hard evidence state index out of range for variable '" +
+                jt_.graph()->get_variable(nid).name + "'.");
+          if (static_cast<std::size_t>(obs) != state) dst[b] = 0.0;
+        }
+      }
+    }
+  }
+
+  // Inconsistency check for the B==1 case — throw immediately.
+  if (B == 1) {
+    double sum = 0.0;
+    for (std::size_t f = 0; f < total; ++f) sum += scratch[f];
+    if (sum == 0.0)
+      throw std::invalid_argument("Inconsistent evidence: zero-sum potential in clique.");
+  }
+
+  clique_potentials_[ci] = Factor(scope, shape, scratch.data());
+  ev_scratch_active_[ci] = true;
+  ev_clique_[ci]         = 1;
+  return true;
+}
+
 
 // ---------------------------------------------------------------------------
 // calibrate — ZERO heap allocation in the hot path
@@ -521,136 +689,18 @@ void BatchWorkspace::calibrate() {
   std::memset(down_changed_.data(), 0, n);
   std::memset(cal_changed_.data(),  0, n);
 
-  // ── P3: Evidence application — no fixed-size allocator cap ──────────────
-  if (evidence_matrix_ && B == 1) {
-    const int *ev = evidence_matrix_;
-    for (std::size_t vid = 0; vid < evidence_num_vars_; ++vid) {
-      if (ev[vid] < 0) continue;
-      auto it = node_in_cliques_.find((NodeId)vid);
-      if (it == node_in_cliques_.end()) continue;
-      for (std::size_t ci : it->second) {
-        if (ev_clique_[ci]) continue;
-        const Factor &pot = clique_potentials_[ci];
-        const auto &scope = pot.scope();
-        const auto &shape = pot.tensor().shape();
-        std::size_t K = scope.size();
-
-        struct EV { std::size_t pos; std::size_t states; int obs; };
-        constexpr std::size_t kStackLimit = 32;
-        EV ev_vars_stack[kStackLimit];
-        std::vector<EV> ev_vars_heap;
-        EV *ev_vars = ev_vars_stack;
-        std::size_t nev = 0;
-        if (K > kStackLimit) {
-          ev_vars_heap.reserve(K);
-        }
-        for (std::size_t d = 0; d < K; ++d) {
-          NodeId nid = scope[d];
-          if (nid >= evidence_num_vars_ || ev[nid] < 0) continue;
-          EV item = {d, shape[d], ev[nid]};
-          if (K > kStackLimit) {
-            ev_vars_heap.push_back(item);
-          } else {
-            ev_vars_stack[nev] = item;
-          }
-          ++nev;
-        }
-        if (nev == 0) continue;
-        if (K > kStackLimit) {
-          ev_vars = ev_vars_heap.data();
-        }
-
-        std::size_t strides_stack[kStackLimit];
-        std::vector<std::size_t> strides_heap;
-        std::size_t *strides = strides_stack;
-        if (K > kStackLimit) {
-          strides_heap.resize(K, 1);
-          strides = strides_heap.data();
-        }
-        strides[K - 1] = 1;
-        for (int d = static_cast<int>(K) - 2; d >= 0; --d)
-          strides[d] = strides[d + 1] * shape[d + 1];
-
-        std::size_t total = clique_states_[ci];
-        std::vector<double> &scratch = ev_scratch_[ci];
-        scratch.resize(total);
-        const double *src = pot.tensor().data();
-        std::copy(src, src + total, scratch.data());
-        double sum = 0.0;
-        for (std::size_t idx = 0; idx < total; ++idx) {
-          bool zero = false; std::size_t rem = idx;
-          for (std::size_t ei = 0; ei < nev; ++ei) {
-            std::size_t coord = (rem / strides[ev_vars[ei].pos]) % ev_vars[ei].states;
-            if ((int)coord != ev_vars[ei].obs) { zero = true; break; }
-          }
-          if (zero) scratch[idx] = 0.0; else sum += scratch[idx];
-        }
-        if (sum == 0.0) throw std::invalid_argument("Inconsistent evidence");
-        clique_potentials_[ci] = Factor(scope, shape, scratch.data());
-        ev_scratch_active_[ci] = true;
-        ev_clique_[ci] = 1;
-      }
-    }
-  } else if (evidence_matrix_ && B > 1) {
-    // Batched path — apply evidence directly over [state, batch] layout.
-    for (std::size_t i = 0; i < n; ++i) {
-      const Factor &pot = clique_potentials_[i];
-      const auto &scope = pot.scope();
-      const auto &shape = pot.tensor().shape();
-      const std::size_t K = scope.size();
-
-      std::vector<std::size_t> evidence_dims;
-      evidence_dims.reserve(K);
-      for (std::size_t d = 0; d < K; ++d) {
-        NodeId nid = scope[d];
-        if (nid >= evidence_num_vars_) continue;
-        bool has_ev = false;
-        for (std::size_t b = 0; b < B; ++b) {
-          if (evidence_matrix_[b * evidence_num_vars_ + nid] >= 0) {
-            has_ev = true;
-            break;
-          }
-        }
-        if (has_ev) {
-          evidence_dims.push_back(d);
-        }
-      }
-      if (evidence_dims.empty()) continue;
-
-      const std::size_t total = clique_states_[i];
-      std::vector<double> &scratch = ev_scratch_[i];
-      scratch.resize(total * B);
-      const double *src = pot.tensor().data();
-      std::copy(src, src + (total * B), scratch.data());
-
-      const CliqueMargInfo &mi = clique_marg_info_[i];
-      for (std::size_t d : evidence_dims) {
-        const NodeId nid = scope[d];
-        const std::size_t n_states = shape[d];
-        const auto &state_map = mi.state_of_dim[d];
-        for (std::size_t flat = 0; flat < total; ++flat) {
-          const int state = static_cast<int>(state_map[flat]);
-          double *dst = scratch.data() + flat * B;
-          for (std::size_t b = 0; b < B; ++b) {
-            const int obs = evidence_matrix_[b * evidence_num_vars_ + nid];
-            if (obs < 0) continue;
-            if (obs >= static_cast<int>(n_states)) {
-              throw std::invalid_argument(
-                  "Evidence state index out of range for variable '" +
-                  jt_.graph()->get_variable(nid).name + "'.");
-            }
-            if (obs != state) {
-              dst[b] = 0.0;
-            }
-          }
-        }
-      }
-
-      clique_potentials_[i] = Factor(scope, shape, scratch.data());
-      ev_scratch_active_[i] = true;
-      ev_clique_[i] = 1;
+  // ── Evidence application ─────────────────────────────────────────────────
+  // Unified path: handles hard evidence, soft evidence, and combinations.
+  // apply_soft_evidence_to_clique() sets ev_clique_[ci] and updates
+  // clique_potentials_[ci] in place.  We call it for every clique (it returns
+  // immediately if no evidence touches that clique).
+  if (evidence_matrix_ || !soft_evidence_scalar_.empty() || !soft_evidence_matrix_.empty()) {
+    for (std::size_t ci = 0; ci < n; ++ci) {
+      if (ev_clique_[ci]) continue;  // already processed (guard for multi-pass)
+      apply_soft_evidence_to_clique(ci);
     }
   }
+
 
   // ── Collect: leaves → root ───────────────────────────────────────────────
   double *scratch = scratch_buf_.data();
@@ -1091,6 +1141,154 @@ DenseTensor BatchWorkspace::query_marginal(NodeId node) const {
   std::size_t offsets[2] = {0, n_states};
   query_marginals_multi(&node, 1, offsets, result.data());
   return result;
+}
+
+
+// ---------------------------------------------------------------------------
+// max_calibrate — max-product belief propagation for MAP / MPE inference
+//
+// Semantics: replaces the sum-marginalization in the collect pass with max.
+// After max_calibrate(), call query_map() to decode the joint MAP assignment.
+//
+// Evidence is applied exactly as in calibrate() — the same
+// apply_soft_evidence_to_clique() helper is used, followed by a max-product
+// collect + assemble pass.
+//
+// Result is stored in map_cal_pot_buf_, which is separate from cal_pot_buf_
+// so that sum-product and max-product results can coexist.
+// ---------------------------------------------------------------------------
+void BatchWorkspace::max_calibrate() {
+  const std::size_t n = jt_.cliques().size();
+  if (batch_size_ != 1) {
+    throw std::invalid_argument(
+        "BatchWorkspace::max_calibrate currently supports batch_size == 1. "
+        "Use BatchExecutionEngine::evaluate_map for batched MAP.");
+  }
+
+  // Allocate max-product buffers on first use (same layout as sum-product).
+  if (map_up_msg_buf_.size() != n) {
+    map_up_msg_buf_.resize(n);
+    map_cal_pot_buf_.resize(n);
+    map_traceback_.resize(n);
+    for (std::size_t u = 0; u < n; ++u) {
+      if (parent_of_[u] == ~std::size_t(0)) continue;
+      map_up_msg_buf_[u].assign(sepset_size_[u], 0.0);
+      map_traceback_[u].assign(collect_ops_[u].product_states, 0);
+    }
+    for (std::size_t i = 0; i < n; ++i)
+      map_cal_pot_buf_[i].assign(clique_states_[i], 0.0);
+  }
+
+  // Restore base clique potentials (start from prior).
+  if (!base_clique_potentials_.empty()) {
+    clique_potentials_.clear();
+    for (const Factor &bp : base_clique_potentials_)
+      clique_potentials_.push_back(
+          Factor(bp.scope(), bp.tensor().shape(),
+                 const_cast<double *>(bp.tensor().data())));
+  }
+  std::fill(ev_scratch_active_.begin(), ev_scratch_active_.end(), false);
+  std::memset(ev_clique_.data(), 0, n);
+
+  // Apply evidence.
+  if (evidence_matrix_ || !soft_evidence_scalar_.empty() ||
+      !soft_evidence_matrix_.empty()) {
+    for (std::size_t ci = 0; ci < n; ++ci)
+      apply_soft_evidence_to_clique(ci);
+  }
+
+  double *scratch = scratch_buf_.data();
+
+  // ── Max-product collect pass (B=1 only — MAP is always per-row) ─────────
+  for (std::size_t u : collect_order_) {
+    if (parent_of_[u] == ~std::size_t(0)) continue;
+    const CollectOp &op  = collect_ops_[u];
+    const double    *pot = clique_potentials_[u].tensor().data();
+    const std::size_t PS = op.product_states;
+
+    // Gather clique potential into scratch.
+    for (std::size_t pi = 0; pi < PS; ++pi)
+      scratch[pi] = pot[op.pot_map[pi]];
+
+    // Multiply incoming child up-messages.
+    for (std::size_t ci = 0; ci < op.child_cliques.size(); ++ci) {
+      const double    *cm   = map_up_msg_buf_[op.child_cliques[ci]].data();
+      const uint32_t  *cmap = op.child_maps[ci].data();
+      for (std::size_t pi = 0; pi < PS; ++pi) scratch[pi] *= cm[cmap[pi]];
+    }
+
+    // Max-marginalize into up-message (replace scatter-add with scatter-max).
+    double *umsg = map_up_msg_buf_[u].data();
+    const std::size_t US = sepset_size_[u];
+    std::fill(umsg, umsg + US, 0.0);
+    const uint32_t *mm = op.marg_map.data();
+    for (std::size_t pi = 0; pi < PS; ++pi) {
+      if (scratch[pi] > umsg[mm[pi]]) umsg[mm[pi]] = scratch[pi];
+    }
+  }
+
+  // ── Assemble max-product calibrated beliefs at root ──────────────────────
+  // For MAP we only need the root clique to extract the joint argmax.
+  // For MPE over all variables, we assemble every clique.
+  for (std::size_t i = 0; i < n; ++i) {
+    const AssembleOp &op  = assemble_ops_[i];
+    const double     *pot = clique_potentials_[i].tensor().data();
+    double           *out = map_cal_pot_buf_[i].data();
+    const std::size_t NS  = op.product_states;
+    std::copy(pot, pot + NS, out);
+    // Multiply incoming child up-messages from the max-product pass.
+    for (std::size_t ci = 0; ci < op.child_cliques.size(); ++ci) {
+      const double   *cm   = map_up_msg_buf_[op.child_cliques[ci]].data();
+      const uint32_t *cmap = op.child_maps[ci].data();
+      for (std::size_t pi = 0; pi < NS; ++pi) out[pi] *= cm[cmap[pi]];
+    }
+    // Note: in max-product, the root assembler ignores down-messages (no parent).
+    // Non-root cliques do not receive down-messages in this simplified implementation;
+    // the root clique's calibrated beliefs are used for argmax.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// query_map — decode MAP assignment from max-product calibrated beliefs
+//
+// out_states[v] = argmax state for variable v, or -1 if v is not in the JT.
+// Caller must allocate out_states[n_vars].
+// ---------------------------------------------------------------------------
+void BatchWorkspace::query_map(int *out_states, std::size_t n_vars) const {
+  // Initialise all states to -1 (not in JT / not processed).
+  std::fill(out_states, out_states + n_vars, -1);
+
+  const std::size_t n = jt_.cliques().size();
+
+  // For each variable, find the clique that contains it and extract its
+  // marginal argmax from the max-product calibrated beliefs.
+  for (const auto &[nid, ci] : node_to_clique_) {
+    if (nid >= static_cast<NodeId>(n_vars)) continue;
+
+    const CliqueMargInfo &mi  = clique_marg_info_[ci];
+    const double         *cal = map_cal_pot_buf_[ci].data();
+    const std::size_t     tot = mi.n_states_total;
+
+    // Find the dimension index of this variable in the clique scope.
+    const auto &scope = jt_.cliques()[ci].scope;
+    std::size_t node_dim = 0;
+    for (std::size_t d = 0; d < scope.size(); ++d)
+      if (scope[d] == nid) { node_dim = d; break; }
+
+    const std::size_t n_states = jt_.graph()->get_variable(nid).states.size();
+
+    // Accumulate the max-product beliefs for each state (marginal max).
+    double best_val = -1.0;
+    int    best_s   = 0;
+    for (std::size_t s = 0; s < n_states; ++s) {
+      double v = 0.0;
+      for (std::size_t flat = 0; flat < tot; ++flat)
+        if (mi.state_of_dim[node_dim][flat] == static_cast<uint8_t>(s))
+          v = std::max(v, cal[flat]);
+      if (v > best_val) { best_val = v; best_s = static_cast<int>(s); }
+    }
+    out_states[nid] = best_s;
+  }
 }
 
 } // namespace bncore

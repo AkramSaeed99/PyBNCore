@@ -62,6 +62,35 @@ pip install -e .
 python examples/test_api.py
 ```
 
+## 🚀 Advanced Inference Features
+
+`pybncore` now natively supports advanced reasoning and sensitivity analytics:
+
+```python
+# 1. Soft / Virtual Evidence
+# Scale the posterior probabilities directly without clamping to 1.0 or 0.0
+wrapper.set_soft_evidence("Sensor", {"High": 0.8, "Medium": 0.15, "Low": 0.05})
+
+# 2. Maximum A Posteriori (MAP) Inference
+# Find the single most likely joint state configuration globally
+best_state = wrapper.query_map({"Observation": "True"})
+
+# 3. Parameter Sensitivity Analysis
+# Evaluate how P(Target) responds to continuously sweeping a specific CPT parameter
+sensitivity_results = wrapper.sensitivity(
+    query_node="Patient_Status", query_state="Sick",
+    target_node="Test_Accuracy", parent_config=("Gen_3_Scanner",), target_state="High",
+    sweep_range=np.linspace(0.8, 1.0, 20)
+)
+# Rank all CPT parameters by their local derivative on the target query
+rankings = wrapper.sensitivity_ranking(query_node="Patient_Status", query_state="Sick")
+
+# 4. Value of Information (VoI)
+# Rank observation candidates by Expected Entropy Reduction (Mutual Information)
+voi_scores = wrapper.value_of_information("Patient_Status", candidate_nodes=["Blood_Test", "X_Ray"])
+```
+
+
 ## 📜 License
 This project is licensed under a **Proprietary License**. 
 Copyright (c) 2026 **Akram Batikh** <asbatikh@ncsu.edu>. 

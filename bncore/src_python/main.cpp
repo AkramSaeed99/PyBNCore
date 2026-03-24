@@ -170,7 +170,55 @@ NB_MODULE(_core, m) {
                                   output.data());
           },
           nb::arg("evidence"), nb::arg("output"), nb::arg("query_vars"),
-          nb::arg("output_offsets"));
+          nb::arg("output_offsets"))
+      .def(
+          "evaluate_map",
+          [](bncore::BatchExecutionEngine &engine,
+             nb::ndarray<int, nb::c_contig, nb::device::cpu> evidence,
+             nb::ndarray<int, nb::c_contig, nb::device::cpu> output) {
+            if (evidence.ndim() != 2) {
+              throw std::invalid_argument(
+                  "evidence must be a 2D int ndarray.");
+            }
+
+            const std::size_t batch_size = evidence.shape(0);
+            const std::size_t num_vars = evidence.shape(1);
+            const std::size_t model_vars =
+                engine.junction_tree().graph()->num_variables();
+            if (output.ndim() != 2 || output.shape(0) != batch_size ||
+                output.shape(1) != model_vars) {
+              throw std::invalid_argument(
+                  "output MUST have shape (batch_size, model_num_vars).");
+            }
+
+            nb::gil_scoped_release release;
+            engine.evaluate_map(evidence.data(), batch_size, num_vars,
+                                output.data());
+          },
+          nb::arg("evidence"), nb::arg("output"))
+      .def(
+          "set_soft_evidence",
+          [](bncore::BatchExecutionEngine &engine, bncore::NodeId var,
+             nb::ndarray<double, nb::c_contig, nb::device::cpu> likelihoods) {
+            if (likelihoods.ndim() != 1)
+              throw std::invalid_argument("likelihoods must be 1D.");
+            engine.set_soft_evidence(var, likelihoods.data(),
+                                     likelihoods.shape(0));
+          },
+          nb::arg("var"), nb::arg("likelihoods"))
+      .def(
+          "set_soft_evidence_matrix",
+          [](bncore::BatchExecutionEngine &engine, bncore::NodeId var,
+             nb::ndarray<double, nb::c_contig, nb::device::cpu> likelihoods_matrix) {
+            if (likelihoods_matrix.ndim() != 2)
+              throw std::invalid_argument("likelihoods_matrix must be 2D.");
+            engine.set_soft_evidence_matrix(
+                var, likelihoods_matrix.data(),
+                likelihoods_matrix.shape(0) * likelihoods_matrix.shape(1));
+          },
+          nb::arg("var"), nb::arg("likelihoods_matrix"))
+      .def("clear_soft_evidence",
+           &bncore::BatchExecutionEngine::clear_soft_evidence);
 
   nb::class_<bncore::DiscretizationManager>(m, "DiscretizationManager")
       .def(nb::init<std::size_t>(), nb::arg("max_bins_per_var") = 50)
