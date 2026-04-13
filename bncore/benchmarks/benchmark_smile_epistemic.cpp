@@ -1,5 +1,5 @@
-#include "../../smile_cpp/smile.h"
-#include "../../smile_license (1)/smile_license.h"
+#include "../deps/smile_cpp/smile.h"
+#include "../deps/smile_license/smile_license.h"
 #include <chrono>
 #include <iostream>
 #include <random>

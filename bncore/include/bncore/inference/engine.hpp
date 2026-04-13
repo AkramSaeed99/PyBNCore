@@ -1,8 +1,8 @@
 #pragma once
 #include "bncore/inference/junction_tree.hpp"
 #include "bncore/inference/workspace.hpp"
+#include "bncore/util/thread_pool.hpp"
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <thread>
 #include <unordered_map>
@@ -48,11 +48,20 @@ private:
                                         std::size_t current_batch_start,
                                         std::size_t current_chunk_size) const;
 
+  // Get or create a workspace from the pool for the given thread index.
+  BatchWorkspace &get_pooled_workspace(std::size_t thread_idx);
+
   const JunctionTree &jt_;
   std::size_t num_threads_;
   std::size_t chunk_size_;
   std::unique_ptr<BatchWorkspace> single_workspace_cache_;
   std::size_t single_workspace_batch_size_ = 0;
+
+  // Persistent thread pool — eliminates per-call thread creation overhead
+  std::unique_ptr<ThreadPool> thread_pool_;
+
+  // Workspace pool — one per thread, reused across evaluate() calls
+  std::vector<std::unique_ptr<BatchWorkspace>> workspace_pool_;
 
   std::unordered_map<bncore::NodeId, std::vector<double>> soft_evidence_scalar_;
   // mapping NodeId -> matrix [row_major, batch_size * n_states]

@@ -289,17 +289,10 @@ class PyBNCoreWrapper:
                 if state in outcomes:
                     state_idx = outcomes.index(state)
                 else:
-                    tgt = "".join(ch for ch in str(state).lower() if ch.isalnum())
-                    state_idx = -1
-                    for i, out in enumerate(outcomes):
-                        norm_out = "".join(ch for ch in str(out).lower() if ch.isalnum())
-                        if norm_out == tgt:
-                            state_idx = i
-                            break
-                    if state_idx < 0:
-                        raise ValueError(
+                    raise ValueError(
                             f"Unknown outcome '{state}' for node '{node_name}' "
-                            f"(outcomes={outcomes})"
+                            f"(outcomes={outcomes}). "
+                            f"State names must match exactly."
                         )
             if state_idx < 0 or state_idx >= len(self._node_states[node_name]):
                 raise IndexError(

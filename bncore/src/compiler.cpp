@@ -64,15 +64,24 @@ JunctionTreeCompiler::compile(const Graph &graph,
   std::vector<std::vector<NodeId>> adj = moral_graph;
   std::vector<std::vector<NodeId>> cliques;
 
+  // Heuristic selection for elimination ordering:
+  //   "min_weight"        — minimize product of state counts (default, best general)
+  //   "min_fill"          — minimize number of fill edges added
+  //   "min_degree"        — minimize number of active neighbours
+  //   "weighted_min_fill" — minimize fill edges weighted by state count product
+  enum class Heuristic { MinWeight, MinFill, MinDegree, WeightedMinFill };
+  Heuristic h = Heuristic::MinWeight;
+  if (heuristic == "min_fill")            h = Heuristic::MinFill;
+  else if (heuristic == "min_degree")     h = Heuristic::MinDegree;
+  else if (heuristic == "weighted_min_fill") h = Heuristic::WeightedMinFill;
+  else if (heuristic != "min_weight" && heuristic != "min_fill")
+    h = Heuristic::MinWeight;  // default fallback
+
   for (std::size_t step = 0; step < n; ++step) {
     std::size_t best_node = n;
-    // P4: min-weight heuristic — score = product of state counts of the new
-    // clique (node + active neighbours).  For equal weights we break ties by
-    // fewer fill edges, then by smaller clique size.  This avoids selecting
-    // high-cardinality nodes that would create enormous clique tables.
-    std::size_t best_weight = std::numeric_limits<std::size_t>::max();
-    std::size_t best_fill   = std::numeric_limits<std::size_t>::max();
-    std::size_t best_size   = std::numeric_limits<std::size_t>::max();
+    std::size_t best_score1 = std::numeric_limits<std::size_t>::max();
+    std::size_t best_score2 = std::numeric_limits<std::size_t>::max();
+    std::size_t best_score3 = std::numeric_limits<std::size_t>::max();
 
     for (std::size_t i = 0; i < n; ++i) {
       if (eliminated[i]) continue;
@@ -88,24 +97,49 @@ JunctionTreeCompiler::compile(const Graph &graph,
                         neighbors[v]) == adj[neighbors[u]].end())
             fill_edges++;
 
-      // Compute clique weight = product of state counts (cap at ULLONG_MAX/2
-      // to avoid overflow — just needs to be a consistent ordering).
+      // Compute clique weight = product of state counts
       std::size_t weight = graph.get_variable(i).states.size();
       for (NodeId nb : neighbors) {
         std::size_t ns = graph.get_variable(nb).states.size();
         if (weight > (std::numeric_limits<std::size_t>::max() / 2) / ns)
-          weight = std::numeric_limits<std::size_t>::max() / 2; // saturate
+          weight = std::numeric_limits<std::size_t>::max() / 2;
         else
           weight *= ns;
       }
       std::size_t clique_sz = neighbors.size() + 1;
 
-      if (weight < best_weight ||
-          (weight == best_weight && fill_edges < best_fill) ||
-          (weight == best_weight && fill_edges == best_fill && clique_sz < best_size)) {
-        best_weight = weight;
-        best_fill   = fill_edges;
-        best_size   = clique_sz;
+      // Compute weighted fill = sum of state_count products for each fill edge
+      std::size_t weighted_fill = 0;
+      if (h == Heuristic::WeightedMinFill) {
+        for (std::size_t u = 0; u < neighbors.size(); ++u)
+          for (std::size_t v = u + 1; v < neighbors.size(); ++v)
+            if (std::find(adj[neighbors[u]].begin(), adj[neighbors[u]].end(),
+                          neighbors[v]) == adj[neighbors[u]].end()) {
+              std::size_t w = graph.get_variable(neighbors[u]).states.size() *
+                              graph.get_variable(neighbors[v]).states.size();
+              weighted_fill += w;
+            }
+      }
+
+      // Score based on heuristic
+      std::size_t s1, s2, s3;
+      switch (h) {
+        case Heuristic::MinWeight:
+          s1 = weight; s2 = fill_edges; s3 = clique_sz; break;
+        case Heuristic::MinFill:
+          s1 = fill_edges; s2 = weight; s3 = clique_sz; break;
+        case Heuristic::MinDegree:
+          s1 = clique_sz; s2 = fill_edges; s3 = weight; break;
+        case Heuristic::WeightedMinFill:
+          s1 = weighted_fill; s2 = weight; s3 = clique_sz; break;
+      }
+
+      if (s1 < best_score1 ||
+          (s1 == best_score1 && s2 < best_score2) ||
+          (s1 == best_score1 && s2 == best_score2 && s3 < best_score3)) {
+        best_score1 = s1;
+        best_score2 = s2;
+        best_score3 = s3;
         best_node   = i;
       }
     }

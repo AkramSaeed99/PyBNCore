@@ -34,6 +34,15 @@ public:
     return separators_;
   }
 
+  // Triangulation quality metrics
+  struct Stats {
+    std::size_t num_cliques;
+    std::size_t max_clique_size;       // largest clique scope
+    std::size_t treewidth;             // max_clique_size - 1
+    std::size_t total_table_entries;   // sum of clique state products
+  };
+  [[nodiscard]] Stats stats() const;
+
   std::vector<Clique> &get_mutable_cliques() { return cliques_; }
 
 private:

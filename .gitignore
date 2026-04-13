@@ -73,6 +73,9 @@ bin/
 # User generated
 .gemini/
 
+# Third-party dependencies (SMILE, etc.)
+bncore/deps/
+
 # Benchmark compiled binaries (no extension, built in-place)
 bncore/benchmarks/benchmark_smile
 bncore/benchmarks/benchmark_smile_epistemic

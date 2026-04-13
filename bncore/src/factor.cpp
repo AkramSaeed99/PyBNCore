@@ -129,20 +129,35 @@ Factor Factor::multiply(const Factor &other, BumpAllocator *allocator) const {
       double val_b = b_data[map_b[c_idx]];
       c_data[c_idx] = val_a * val_b;
     }
-  } else {
+  } else if (a_batched && b_batched) {
+    // Both batched: contiguous element-wise multiply
     for (std::size_t c_idx = 0; c_idx < num_states_C; ++c_idx) {
       double *c_ptr = c_data + c_idx * batch_size;
-      const double *a_ptr =
-          a_data + map_a[c_idx] * (a_batched ? batch_size : 1);
-      const double *b_ptr =
-          b_data + map_b[c_idx] * (b_batched ? batch_size : 1);
-
+      const double *a_ptr = a_data + map_a[c_idx] * batch_size;
+      const double *b_ptr = b_data + map_b[c_idx] * batch_size;
 #pragma omp simd
-      for (std::size_t b = 0; b < batch_size; ++b) {
-        double val_a = a_batched ? a_ptr[b] : a_ptr[0];
-        double val_b = b_batched ? b_ptr[b] : b_ptr[0];
-        c_ptr[b] = val_a * val_b;
-      }
+      for (std::size_t b = 0; b < batch_size; ++b)
+        c_ptr[b] = a_ptr[b] * b_ptr[b];
+    }
+  } else if (a_batched) {
+    // A batched, B scalar: broadcast B across batch
+    for (std::size_t c_idx = 0; c_idx < num_states_C; ++c_idx) {
+      double *c_ptr = c_data + c_idx * batch_size;
+      const double *a_ptr = a_data + map_a[c_idx] * batch_size;
+      const double scalar_b = b_data[map_b[c_idx]];
+#pragma omp simd
+      for (std::size_t b = 0; b < batch_size; ++b)
+        c_ptr[b] = a_ptr[b] * scalar_b;
+    }
+  } else {
+    // A scalar, B batched: broadcast A across batch
+    for (std::size_t c_idx = 0; c_idx < num_states_C; ++c_idx) {
+      double *c_ptr = c_data + c_idx * batch_size;
+      const double scalar_a = a_data[map_a[c_idx]];
+      const double *b_ptr = b_data + map_b[c_idx] * batch_size;
+#pragma omp simd
+      for (std::size_t b = 0; b < batch_size; ++b)
+        c_ptr[b] = scalar_a * b_ptr[b];
     }
   }
   return result;

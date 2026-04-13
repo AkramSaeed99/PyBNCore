@@ -19,6 +19,21 @@ BatchExecutionEngine::BatchExecutionEngine(const JunctionTree &jt,
     num_threads_ = std::thread::hardware_concurrency();
   if (num_threads_ == 0)
     num_threads_ = 1;
+
+  // Create persistent thread pool (threads live for engine lifetime)
+  if (num_threads_ > 1) {
+    thread_pool_ = std::make_unique<ThreadPool>(num_threads_);
+  }
+}
+
+BatchWorkspace &BatchExecutionEngine::get_pooled_workspace(std::size_t thread_idx) {
+  if (workspace_pool_.size() <= thread_idx) {
+    workspace_pool_.resize(thread_idx + 1);
+  }
+  if (!workspace_pool_[thread_idx]) {
+    workspace_pool_[thread_idx] = std::make_unique<BatchWorkspace>(jt_, chunk_size_);
+  }
+  return *workspace_pool_[thread_idx];
 }
 
 void BatchExecutionEngine::evaluate(const int *evidence_data,
@@ -55,8 +70,6 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
 
   std::size_t num_chunks = (batch_size + chunk_size_ - 1) / chunk_size_;
 
-  // P2: Use query_marginals_multi — single clique scan for all queries,
-  // with pre-baked state_of_dim maps (no Factor::marginalize allocation).
   // Convert size_t query_vars to NodeId (uint32_t) once here.
   std::vector<bncore::NodeId> qvars_nodeid(num_queries);
   for (std::size_t i = 0; i < num_queries; ++i)
@@ -69,9 +82,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
                                     output_offsets, out_row);
   };
 
-
-  // Fast path for the most common Python/HCL usage pattern:
-  // single context query repeatedly from the same engine instance.
+  // Fast path for single-chunk (most common Python/HCL usage)
   if (num_chunks == 1) {
     const std::size_t current_chunk_size = batch_size;
     if (!single_workspace_cache_ ||
@@ -91,13 +102,17 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
       workspace.clear_evidence();
     }
     apply_soft_evidence_to_workspace(workspace, 0, current_chunk_size);
+    workspace.set_query_scope(qvars_nodeid.data(), num_queries);
     workspace.calibrate();
     write_query_outputs(workspace, /*current_batch_start=*/0);
     return;
   }
 
-  auto worker = [&](std::size_t start_chunk, std::size_t end_chunk) {
-    BatchWorkspace workspace(jt_, chunk_size_);
+  // Multi-chunk processing with thread pool
+  auto process_chunks = [&](std::size_t thread_idx,
+                            std::size_t start_chunk,
+                            std::size_t end_chunk) {
+    BatchWorkspace &workspace = get_pooled_workspace(thread_idx);
 
     for (std::size_t c = start_chunk; c < end_chunk; ++c) {
       std::size_t current_batch_start = c * chunk_size_;
@@ -113,6 +128,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
         workspace.set_evidence_matrix(chunk_evidence, num_vars);
 
       apply_soft_evidence_to_workspace(workspace, current_batch_start, current_chunk_size);
+      workspace.set_query_scope(qvars_nodeid.data(), num_queries);
       workspace.calibrate();
       write_query_outputs(workspace, current_batch_start);
     }
@@ -120,28 +136,26 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
 
   const std::size_t effective_threads =
       std::max<std::size_t>(1, std::min(num_threads_, num_chunks));
-  if (effective_threads == 1 || num_chunks <= 1) {
-    worker(0, num_chunks);
+
+  if (effective_threads == 1 || !thread_pool_) {
+    process_chunks(0, 0, num_chunks);
     return;
   }
 
-  std::vector<std::future<void>> futures;
+  // Distribute chunks across pool threads
   std::size_t chunks_per_thread =
       (num_chunks + effective_threads - 1) / effective_threads;
 
-  for (std::size_t t = 0; t < effective_threads; ++t) {
-    std::size_t start_chunk = t * chunks_per_thread;
-    std::size_t end_chunk =
-        std::min(start_chunk + chunks_per_thread, num_chunks);
-    if (start_chunk < end_chunk) {
-      futures.push_back(
-          std::async(std::launch::async, worker, start_chunk, end_chunk));
-    }
-  }
-
-  for (auto &f : futures) {
-    f.get();
-  }
+  thread_pool_->run_batch(
+      [&](std::size_t t) {
+        std::size_t start_chunk = t * chunks_per_thread;
+        std::size_t end_chunk =
+            std::min(start_chunk + chunks_per_thread, num_chunks);
+        if (start_chunk < end_chunk) {
+          process_chunks(t, start_chunk, end_chunk);
+        }
+      },
+      effective_threads);
 }
 
 void BatchExecutionEngine::evaluate_map(const int *evidence_data,
@@ -188,8 +202,11 @@ void BatchExecutionEngine::evaluate_map(const int *evidence_data,
     return;
   }
 
-  auto worker = [&](std::size_t start_chunk, std::size_t end_chunk) {
-    BatchWorkspace workspace(jt_, 1);
+  // Multi-row MAP with thread pool
+  auto process_chunks = [&](std::size_t thread_idx,
+                            std::size_t start_chunk,
+                            std::size_t end_chunk) {
+    BatchWorkspace &workspace = get_pooled_workspace(thread_idx);
 
     for (std::size_t c = start_chunk; c < end_chunk; ++c) {
       const std::size_t chunk_start = c * chunk_size_;
@@ -215,33 +232,31 @@ void BatchExecutionEngine::evaluate_map(const int *evidence_data,
 
   const std::size_t effective_threads =
       std::max<std::size_t>(1, std::min(num_threads_, num_chunks));
-  if (effective_threads == 1 || num_chunks <= 1) {
-    worker(0, num_chunks);
+
+  if (effective_threads == 1 || !thread_pool_) {
+    process_chunks(0, 0, num_chunks);
     return;
   }
 
-  std::vector<std::future<void>> futures;
   const std::size_t chunks_per_thread =
       (num_chunks + effective_threads - 1) / effective_threads;
 
-  for (std::size_t t = 0; t < effective_threads; ++t) {
-    const std::size_t start_chunk = t * chunks_per_thread;
-    const std::size_t end_chunk =
-        std::min(start_chunk + chunks_per_thread, num_chunks);
-    if (start_chunk < end_chunk) {
-      futures.push_back(
-          std::async(std::launch::async, worker, start_chunk, end_chunk));
-    }
-  }
-
-  for (auto &f : futures) {
-    f.get();
-  }
+  thread_pool_->run_batch(
+      [&](std::size_t t) {
+        const std::size_t start_chunk = t * chunks_per_thread;
+        const std::size_t end_chunk =
+            std::min(start_chunk + chunks_per_thread, num_chunks);
+        if (start_chunk < end_chunk) {
+          process_chunks(t, start_chunk, end_chunk);
+        }
+      },
+      effective_threads);
 }
 
 void BatchExecutionEngine::invalidate_workspace_cache() {
   single_workspace_cache_.reset();
   single_workspace_batch_size_ = 0;
+  workspace_pool_.clear();
 }
 
 void BatchExecutionEngine::set_soft_evidence(bncore::NodeId var, const double *likelihoods, std::size_t n_states) {
@@ -267,12 +282,6 @@ void BatchExecutionEngine::apply_soft_evidence_to_workspace(BatchWorkspace &work
     workspace.set_soft_evidence(nid, l_vec.data(), l_vec.size());
   }
   for (const auto &[nid, l_mat] : soft_evidence_matrix_) {
-    const std::size_t n_states = l_mat.size() / soft_evidence_matrix_.at(nid).size(); // Wait, this is wrong. Total states is what is stored.
-    // The matrix has shape (batch_size, n_states), so size = B * n_states
-    // Actually, we must derive n_states
-    const std::size_t total_elements = l_mat.size();
-    // In evaluate_multi, batch_size isn't cached. Wait, the Python side provides a (total_batch, n_states) array.
-    // How do we find n_states? It's the variable's cardinality.
     const std::size_t n_states_var = jt_.graph()->get_variable(nid).states.size();
     if (l_mat.size() < (current_batch_start + current_chunk_size) * n_states_var) {
       throw std::invalid_argument("Soft evidence matrix size is too small for the batch dimensions.");
@@ -280,6 +289,5 @@ void BatchExecutionEngine::apply_soft_evidence_to_workspace(BatchWorkspace &work
     workspace.set_soft_evidence_matrix(nid, l_mat.data() + current_batch_start * n_states_var, n_states_var);
   }
 }
-
 
 } // namespace bncore

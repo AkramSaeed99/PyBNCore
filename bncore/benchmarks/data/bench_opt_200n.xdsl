@@ -1,0 +1,1185 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<smile version="1.0" id="BenchmarkNetwork" numsamples="10000" discsamples="10000">
+    <nodes>
+        <cpt id="L0_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.553176 0.446824</probabilities>
+        </cpt>
+        <cpt id="L0_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.469327 0.530673</probabilities>
+        </cpt>
+        <cpt id="L0_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.686852 0.313148</probabilities>
+        </cpt>
+        <cpt id="L0_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.780410 0.219590</probabilities>
+        </cpt>
+        <cpt id="L0_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.459814 0.540186</probabilities>
+        </cpt>
+        <cpt id="L0_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.806364 0.193636</probabilities>
+        </cpt>
+        <cpt id="L0_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.721788 0.278212</probabilities>
+        </cpt>
+        <cpt id="L0_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.483299 0.516701</probabilities>
+        </cpt>
+        <cpt id="L0_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.183558 0.816442</probabilities>
+        </cpt>
+        <cpt id="L0_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.655799 0.344201</probabilities>
+        </cpt>
+        <cpt id="L0_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.720434 0.279566</probabilities>
+        </cpt>
+        <cpt id="L0_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.686651 0.313349</probabilities>
+        </cpt>
+        <cpt id="L0_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.794964 0.205036</probabilities>
+        </cpt>
+        <cpt id="L0_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.876534 0.123466</probabilities>
+        </cpt>
+        <cpt id="L0_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.655914 0.344086</probabilities>
+        </cpt>
+        <cpt id="L0_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.223460 0.776540</probabilities>
+        </cpt>
+        <cpt id="L0_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.691630 0.308370</probabilities>
+        </cpt>
+        <cpt id="L0_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.581735 0.418265</probabilities>
+        </cpt>
+        <cpt id="L0_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.105164 0.894836</probabilities>
+        </cpt>
+        <cpt id="L0_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <probabilities>0.485476 0.514524</probabilities>
+        </cpt>
+        <cpt id="L1_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N17 L0_N2</parents>
+            <probabilities>0.476962 0.523038 0.697952 0.302048 0.101046 0.898954 0.495292 0.504708</probabilities>
+        </cpt>
+        <cpt id="L1_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N14 L0_N19</parents>
+            <probabilities>0.248509 0.751491 0.669112 0.330888 0.607081 0.392919 0.618811 0.381189</probabilities>
+        </cpt>
+        <cpt id="L1_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N8</parents>
+            <probabilities>0.677077 0.322923 0.851246 0.148754</probabilities>
+        </cpt>
+        <cpt id="L1_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N13</parents>
+            <probabilities>0.730908 0.269092 0.360485 0.639515</probabilities>
+        </cpt>
+        <cpt id="L1_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N5 L0_N2 L0_N7</parents>
+            <probabilities>0.835687 0.164313 0.596980 0.403020 0.360234 0.639766 0.466106 0.533894 0.151018 0.848982 0.717769 0.282231 0.199835 0.800165 0.273215 0.726785</probabilities>
+        </cpt>
+        <cpt id="L1_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N3</parents>
+            <probabilities>0.218049 0.781951 0.835243 0.164757</probabilities>
+        </cpt>
+        <cpt id="L1_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N1 L0_N12 L0_N15</parents>
+            <probabilities>0.722683 0.277317 0.316993 0.683007 0.361647 0.638353 0.598849 0.401151 0.640012 0.359988 0.583218 0.416782 0.534288 0.465712 0.553573 0.446427</probabilities>
+        </cpt>
+        <cpt id="L1_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N10 L0_N15</parents>
+            <probabilities>0.878324 0.121676 0.204432 0.795568 0.834293 0.165707 0.243221 0.756779</probabilities>
+        </cpt>
+        <cpt id="L1_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N18</parents>
+            <probabilities>0.838534 0.161466 0.685320 0.314680</probabilities>
+        </cpt>
+        <cpt id="L1_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N19 L0_N17 L0_N1</parents>
+            <probabilities>0.669667 0.330333 0.715741 0.284259 0.421560 0.578440 0.454070 0.545930 0.753857 0.246143 0.842509 0.157491 0.259837 0.740163 0.558971 0.441029</probabilities>
+        </cpt>
+        <cpt id="L1_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N0 L0_N16 L0_N6</parents>
+            <probabilities>0.416723 0.583277 0.634088 0.365912 0.122552 0.877448 0.778524 0.221476 0.125549 0.874451 0.719664 0.280336 0.124873 0.875127 0.247013 0.752987</probabilities>
+        </cpt>
+        <cpt id="L1_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N2 L0_N9 L0_N19</parents>
+            <probabilities>0.882979 0.117021 0.673539 0.326461 0.209195 0.790805 0.101677 0.898323 0.173872 0.826128 0.437475 0.562525 0.689164 0.310836 0.541496 0.458504</probabilities>
+        </cpt>
+        <cpt id="L1_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N5</parents>
+            <probabilities>0.740041 0.259959 0.438704 0.561296</probabilities>
+        </cpt>
+        <cpt id="L1_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N3</parents>
+            <probabilities>0.759861 0.240139 0.263960 0.736040</probabilities>
+        </cpt>
+        <cpt id="L1_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N18 L0_N6</parents>
+            <probabilities>0.702106 0.297894 0.414699 0.585301 0.396773 0.603227 0.509297 0.490703</probabilities>
+        </cpt>
+        <cpt id="L1_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N15</parents>
+            <probabilities>0.363413 0.636587 0.648338 0.351662</probabilities>
+        </cpt>
+        <cpt id="L1_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N6</parents>
+            <probabilities>0.430024 0.569976 0.438332 0.561668</probabilities>
+        </cpt>
+        <cpt id="L1_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N3 L0_N16</parents>
+            <probabilities>0.231228 0.768772 0.678051 0.321949 0.681812 0.318188 0.478401 0.521599</probabilities>
+        </cpt>
+        <cpt id="L1_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N13 L0_N2 L0_N5</parents>
+            <probabilities>0.876877 0.123123 0.393194 0.606806 0.772598 0.227402 0.190228 0.809772 0.392232 0.607768 0.408164 0.591836 0.563143 0.436857 0.492307 0.507693</probabilities>
+        </cpt>
+        <cpt id="L1_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L0_N0 L0_N13</parents>
+            <probabilities>0.176102 0.823898 0.763014 0.236986 0.190218 0.809782 0.274285 0.725715</probabilities>
+        </cpt>
+        <cpt id="L2_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N18 L1_N17 L1_N8</parents>
+            <probabilities>0.769389 0.230611 0.439448 0.560552 0.327594 0.672406 0.850641 0.149359 0.526930 0.473070 0.563701 0.436299 0.548401 0.451599 0.543054 0.456946</probabilities>
+        </cpt>
+        <cpt id="L2_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N13 L1_N0</parents>
+            <probabilities>0.172708 0.827292 0.428317 0.571683 0.896546 0.103454 0.857270 0.142730</probabilities>
+        </cpt>
+        <cpt id="L2_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N10 L1_N4</parents>
+            <probabilities>0.174290 0.825710 0.781393 0.218607 0.728018 0.271982 0.521327 0.478673</probabilities>
+        </cpt>
+        <cpt id="L2_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N7 L1_N11</parents>
+            <probabilities>0.221369 0.778631 0.309024 0.690976 0.738895 0.261105 0.664915 0.335085</probabilities>
+        </cpt>
+        <cpt id="L2_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N11</parents>
+            <probabilities>0.525411 0.474589 0.144994 0.855006</probabilities>
+        </cpt>
+        <cpt id="L2_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N0 L1_N6</parents>
+            <probabilities>0.597053 0.402947 0.416915 0.583085 0.673510 0.326490 0.510712 0.489288</probabilities>
+        </cpt>
+        <cpt id="L2_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N10 L1_N5</parents>
+            <probabilities>0.578500 0.421500 0.457680 0.542320 0.462476 0.537524 0.631545 0.368455</probabilities>
+        </cpt>
+        <cpt id="L2_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N7 L1_N15</parents>
+            <probabilities>0.176406 0.823594 0.331937 0.668063 0.309669 0.690331 0.135968 0.864032</probabilities>
+        </cpt>
+        <cpt id="L2_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N5 L1_N3 L1_N16</parents>
+            <probabilities>0.534913 0.465087 0.269084 0.730916 0.878472 0.121528 0.208502 0.791498 0.315762 0.684238 0.234466 0.765534 0.166305 0.833695 0.178151 0.821849</probabilities>
+        </cpt>
+        <cpt id="L2_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N2</parents>
+            <probabilities>0.792339 0.207661 0.162938 0.837062</probabilities>
+        </cpt>
+        <cpt id="L2_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N19 L1_N8 L1_N14</parents>
+            <probabilities>0.308878 0.691122 0.587202 0.412798 0.538438 0.461562 0.590701 0.409299 0.159355 0.840645 0.408688 0.591312 0.688859 0.311141 0.579066 0.420934</probabilities>
+        </cpt>
+        <cpt id="L2_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N10 L1_N16</parents>
+            <probabilities>0.697571 0.302429 0.535431 0.464569 0.591156 0.408844 0.381936 0.618064</probabilities>
+        </cpt>
+        <cpt id="L2_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N10 L1_N0 L1_N18</parents>
+            <probabilities>0.680241 0.319759 0.387294 0.612706 0.607509 0.392491 0.578128 0.421872 0.721834 0.278166 0.604037 0.395963 0.424241 0.575759 0.197306 0.802694</probabilities>
+        </cpt>
+        <cpt id="L2_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N5 L1_N0</parents>
+            <probabilities>0.179574 0.820426 0.121710 0.878290 0.743401 0.256599 0.466505 0.533495</probabilities>
+        </cpt>
+        <cpt id="L2_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N7 L1_N15 L1_N12</parents>
+            <probabilities>0.777865 0.222135 0.622348 0.377652 0.244582 0.755418 0.823281 0.176719 0.848831 0.151169 0.345757 0.654243 0.181703 0.818297 0.759101 0.240899</probabilities>
+        </cpt>
+        <cpt id="L2_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N18</parents>
+            <probabilities>0.428624 0.571376 0.329173 0.670827</probabilities>
+        </cpt>
+        <cpt id="L2_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N9 L1_N18</parents>
+            <probabilities>0.171148 0.828852 0.714436 0.285564 0.895178 0.104822 0.785237 0.214763</probabilities>
+        </cpt>
+        <cpt id="L2_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N13 L1_N14 L1_N2</parents>
+            <probabilities>0.481815 0.518185 0.383100 0.616900 0.634742 0.365258 0.236019 0.763981 0.595775 0.404225 0.399480 0.600520 0.399725 0.600275 0.255826 0.744174</probabilities>
+        </cpt>
+        <cpt id="L2_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N18 L1_N15 L1_N17</parents>
+            <probabilities>0.668489 0.331511 0.569456 0.430544 0.202365 0.797635 0.601781 0.398219 0.228041 0.771959 0.720127 0.279873 0.192762 0.807238 0.236132 0.763868</probabilities>
+        </cpt>
+        <cpt id="L2_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L1_N8 L1_N18 L1_N5</parents>
+            <probabilities>0.812716 0.187284 0.134335 0.865665 0.411098 0.588902 0.211031 0.788969 0.605943 0.394057 0.518924 0.481076 0.824619 0.175381 0.241103 0.758897</probabilities>
+        </cpt>
+        <cpt id="L3_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N4</parents>
+            <probabilities>0.373239 0.626761 0.680547 0.319453</probabilities>
+        </cpt>
+        <cpt id="L3_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N13</parents>
+            <probabilities>0.831121 0.168879 0.413496 0.586504</probabilities>
+        </cpt>
+        <cpt id="L3_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N10</parents>
+            <probabilities>0.688840 0.311160 0.276748 0.723252</probabilities>
+        </cpt>
+        <cpt id="L3_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N7</parents>
+            <probabilities>0.187698 0.812302 0.780257 0.219743</probabilities>
+        </cpt>
+        <cpt id="L3_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N18 L2_N10 L2_N1</parents>
+            <probabilities>0.333998 0.666002 0.526756 0.473244 0.466207 0.533793 0.631964 0.368036 0.486420 0.513580 0.620819 0.379181 0.142070 0.857930 0.822285 0.177715</probabilities>
+        </cpt>
+        <cpt id="L3_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N10</parents>
+            <probabilities>0.397308 0.602692 0.785506 0.214494</probabilities>
+        </cpt>
+        <cpt id="L3_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N18</parents>
+            <probabilities>0.258901 0.741099 0.462247 0.537753</probabilities>
+        </cpt>
+        <cpt id="L3_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N12 L2_N5</parents>
+            <probabilities>0.249466 0.750534 0.890920 0.109080 0.292031 0.707969 0.388233 0.611767</probabilities>
+        </cpt>
+        <cpt id="L3_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N13 L2_N16</parents>
+            <probabilities>0.287309 0.712691 0.717037 0.282963 0.537861 0.462139 0.748217 0.251783</probabilities>
+        </cpt>
+        <cpt id="L3_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N6 L2_N18 L2_N3</parents>
+            <probabilities>0.562211 0.437789 0.194289 0.805711 0.285770 0.714230 0.824392 0.175608 0.299740 0.700260 0.535427 0.464573 0.301855 0.698145 0.578853 0.421147</probabilities>
+        </cpt>
+        <cpt id="L3_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N1 L2_N15</parents>
+            <probabilities>0.671719 0.328281 0.736684 0.263316 0.672343 0.327657 0.180874 0.819126</probabilities>
+        </cpt>
+        <cpt id="L3_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N1 L2_N5</parents>
+            <probabilities>0.336846 0.663154 0.561512 0.438488 0.322572 0.677428 0.883516 0.116484</probabilities>
+        </cpt>
+        <cpt id="L3_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N5</parents>
+            <probabilities>0.890434 0.109566 0.297856 0.702144</probabilities>
+        </cpt>
+        <cpt id="L3_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N3 L2_N12 L2_N16</parents>
+            <probabilities>0.308817 0.691183 0.613004 0.386996 0.454758 0.545242 0.408453 0.591547 0.846930 0.153070 0.296505 0.703495 0.707008 0.292992 0.186181 0.813819</probabilities>
+        </cpt>
+        <cpt id="L3_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N10 L2_N11</parents>
+            <probabilities>0.517725 0.482275 0.835493 0.164507 0.375954 0.624046 0.490879 0.509121</probabilities>
+        </cpt>
+        <cpt id="L3_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N8 L2_N5 L2_N13</parents>
+            <probabilities>0.457469 0.542531 0.104020 0.895980 0.683045 0.316955 0.544515 0.455485 0.405160 0.594840 0.635167 0.364833 0.717980 0.282020 0.175049 0.824951</probabilities>
+        </cpt>
+        <cpt id="L3_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N4</parents>
+            <probabilities>0.396706 0.603294 0.465294 0.534706</probabilities>
+        </cpt>
+        <cpt id="L3_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N17 L2_N13</parents>
+            <probabilities>0.829453 0.170547 0.477800 0.522200 0.503659 0.496341 0.859656 0.140344</probabilities>
+        </cpt>
+        <cpt id="L3_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N9 L2_N8 L2_N12</parents>
+            <probabilities>0.457976 0.542024 0.790087 0.209913 0.501315 0.498685 0.512195 0.487805 0.468330 0.531670 0.213321 0.786679 0.811710 0.188290 0.639465 0.360535</probabilities>
+        </cpt>
+        <cpt id="L3_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L2_N19 L2_N4</parents>
+            <probabilities>0.550998 0.449002 0.245900 0.754100 0.597979 0.402021 0.290681 0.709319</probabilities>
+        </cpt>
+        <cpt id="L4_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N16 L3_N19 L3_N9</parents>
+            <probabilities>0.816981 0.183019 0.502312 0.497688 0.202250 0.797750 0.408998 0.591002 0.491575 0.508425 0.597723 0.402277 0.512365 0.487635 0.391544 0.608456</probabilities>
+        </cpt>
+        <cpt id="L4_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N8</parents>
+            <probabilities>0.496016 0.503984 0.400543 0.599457</probabilities>
+        </cpt>
+        <cpt id="L4_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N8 L3_N14 L3_N18</parents>
+            <probabilities>0.323777 0.676223 0.552182 0.447818 0.741674 0.258326 0.797495 0.202505 0.142747 0.857253 0.387096 0.612904 0.279108 0.720892 0.585343 0.414657</probabilities>
+        </cpt>
+        <cpt id="L4_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N16</parents>
+            <probabilities>0.695157 0.304843 0.783365 0.216635</probabilities>
+        </cpt>
+        <cpt id="L4_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N5 L3_N0</parents>
+            <probabilities>0.779264 0.220736 0.208831 0.791169 0.118081 0.881919 0.365826 0.634174</probabilities>
+        </cpt>
+        <cpt id="L4_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N17 L3_N5 L3_N15</parents>
+            <probabilities>0.598023 0.401977 0.720539 0.279461 0.858690 0.141310 0.267471 0.732529 0.101967 0.898033 0.127987 0.872013 0.483800 0.516200 0.754182 0.245818</probabilities>
+        </cpt>
+        <cpt id="L4_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N8 L3_N3</parents>
+            <probabilities>0.824694 0.175306 0.766007 0.233993 0.349484 0.650516 0.853592 0.146408</probabilities>
+        </cpt>
+        <cpt id="L4_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N8</parents>
+            <probabilities>0.519488 0.480512 0.431828 0.568172</probabilities>
+        </cpt>
+        <cpt id="L4_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N14 L3_N4 L3_N8</parents>
+            <probabilities>0.223944 0.776056 0.159710 0.840290 0.609757 0.390243 0.175913 0.824087 0.571320 0.428680 0.795380 0.204620 0.730479 0.269521 0.145593 0.854407</probabilities>
+        </cpt>
+        <cpt id="L4_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N19</parents>
+            <probabilities>0.738758 0.261242 0.679040 0.320960</probabilities>
+        </cpt>
+        <cpt id="L4_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N1 L3_N0 L3_N13</parents>
+            <probabilities>0.856211 0.143789 0.367866 0.632134 0.657040 0.342960 0.100887 0.899113 0.704980 0.295020 0.729982 0.270018 0.204318 0.795682 0.481612 0.518388</probabilities>
+        </cpt>
+        <cpt id="L4_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N13 L3_N9 L3_N1</parents>
+            <probabilities>0.182787 0.817213 0.538815 0.461185 0.738781 0.261219 0.565431 0.434569 0.323340 0.676660 0.898935 0.101065 0.744988 0.255012 0.840227 0.159773</probabilities>
+        </cpt>
+        <cpt id="L4_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N0 L3_N4</parents>
+            <probabilities>0.365309 0.634691 0.481698 0.518302 0.693759 0.306241 0.337781 0.662219</probabilities>
+        </cpt>
+        <cpt id="L4_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N10 L3_N9 L3_N19</parents>
+            <probabilities>0.649870 0.350130 0.214793 0.785207 0.171351 0.828649 0.543949 0.456051 0.664960 0.335040 0.491157 0.508843 0.753772 0.246228 0.159110 0.840890</probabilities>
+        </cpt>
+        <cpt id="L4_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N14 L3_N5</parents>
+            <probabilities>0.282987 0.717013 0.512997 0.487003 0.379107 0.620893 0.863539 0.136461</probabilities>
+        </cpt>
+        <cpt id="L4_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N19</parents>
+            <probabilities>0.209936 0.790064 0.272561 0.727439</probabilities>
+        </cpt>
+        <cpt id="L4_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N17 L3_N16 L3_N6</parents>
+            <probabilities>0.356423 0.643577 0.799352 0.200648 0.869901 0.130099 0.608189 0.391811 0.162272 0.837728 0.244169 0.755831 0.417350 0.582650 0.416763 0.583237</probabilities>
+        </cpt>
+        <cpt id="L4_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N4 L3_N18</parents>
+            <probabilities>0.832289 0.167711 0.616810 0.383190 0.368850 0.631150 0.515248 0.484752</probabilities>
+        </cpt>
+        <cpt id="L4_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N8 L3_N17 L3_N3</parents>
+            <probabilities>0.176438 0.823562 0.278790 0.721210 0.371925 0.628075 0.529119 0.470881 0.444852 0.555148 0.621000 0.379000 0.131602 0.868398 0.789149 0.210851</probabilities>
+        </cpt>
+        <cpt id="L4_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L3_N13</parents>
+            <probabilities>0.888907 0.111093 0.162415 0.837585</probabilities>
+        </cpt>
+        <cpt id="L5_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N19 L4_N16</parents>
+            <probabilities>0.454056 0.545944 0.509425 0.490575 0.495154 0.504846 0.597285 0.402715</probabilities>
+        </cpt>
+        <cpt id="L5_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N10 L4_N12</parents>
+            <probabilities>0.800186 0.199814 0.188319 0.811681 0.648945 0.351055 0.216810 0.783190</probabilities>
+        </cpt>
+        <cpt id="L5_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N3 L4_N12</parents>
+            <probabilities>0.715237 0.284763 0.320794 0.679206 0.586251 0.413749 0.718881 0.281119</probabilities>
+        </cpt>
+        <cpt id="L5_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N1 L4_N17</parents>
+            <probabilities>0.874989 0.125011 0.564991 0.435009 0.823659 0.176341 0.881225 0.118775</probabilities>
+        </cpt>
+        <cpt id="L5_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N13</parents>
+            <probabilities>0.310394 0.689606 0.423849 0.576151</probabilities>
+        </cpt>
+        <cpt id="L5_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N16</parents>
+            <probabilities>0.520288 0.479712 0.466984 0.533016</probabilities>
+        </cpt>
+        <cpt id="L5_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N16 L4_N9 L4_N7</parents>
+            <probabilities>0.615616 0.384384 0.386924 0.613076 0.321644 0.678356 0.468401 0.531599 0.245251 0.754749 0.507151 0.492849 0.677239 0.322761 0.345019 0.654981</probabilities>
+        </cpt>
+        <cpt id="L5_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N3</parents>
+            <probabilities>0.488261 0.511739 0.738463 0.261537</probabilities>
+        </cpt>
+        <cpt id="L5_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N19</parents>
+            <probabilities>0.403447 0.596553 0.272966 0.727034</probabilities>
+        </cpt>
+        <cpt id="L5_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N16 L4_N2</parents>
+            <probabilities>0.247414 0.752586 0.626015 0.373985 0.552894 0.447106 0.788373 0.211627</probabilities>
+        </cpt>
+        <cpt id="L5_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N9</parents>
+            <probabilities>0.361783 0.638217 0.402224 0.597776</probabilities>
+        </cpt>
+        <cpt id="L5_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N19</parents>
+            <probabilities>0.424363 0.575637 0.898557 0.101443</probabilities>
+        </cpt>
+        <cpt id="L5_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N14 L4_N8</parents>
+            <probabilities>0.860032 0.139968 0.149605 0.850395 0.588391 0.411609 0.603241 0.396759</probabilities>
+        </cpt>
+        <cpt id="L5_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N15 L4_N9 L4_N11</parents>
+            <probabilities>0.867925 0.132075 0.498521 0.501479 0.704835 0.295165 0.661750 0.338250 0.174272 0.825728 0.883319 0.116681 0.198767 0.801233 0.705993 0.294007</probabilities>
+        </cpt>
+        <cpt id="L5_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N14</parents>
+            <probabilities>0.766758 0.233242 0.828140 0.171860</probabilities>
+        </cpt>
+        <cpt id="L5_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N11</parents>
+            <probabilities>0.898423 0.101577 0.234462 0.765538</probabilities>
+        </cpt>
+        <cpt id="L5_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N15</parents>
+            <probabilities>0.862297 0.137703 0.176285 0.823715</probabilities>
+        </cpt>
+        <cpt id="L5_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N15 L4_N17 L4_N9</parents>
+            <probabilities>0.177259 0.822741 0.703018 0.296982 0.235879 0.764121 0.816710 0.183290 0.181544 0.818456 0.545127 0.454873 0.793154 0.206846 0.653461 0.346539</probabilities>
+        </cpt>
+        <cpt id="L5_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N8 L4_N0</parents>
+            <probabilities>0.639548 0.360452 0.668445 0.331555 0.315815 0.684185 0.403442 0.596558</probabilities>
+        </cpt>
+        <cpt id="L5_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L4_N3 L4_N19</parents>
+            <probabilities>0.254706 0.745294 0.828270 0.171730 0.512400 0.487600 0.332796 0.667204</probabilities>
+        </cpt>
+        <cpt id="L6_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N2</parents>
+            <probabilities>0.663290 0.336710 0.472878 0.527122</probabilities>
+        </cpt>
+        <cpt id="L6_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N14 L5_N16 L5_N13</parents>
+            <probabilities>0.348710 0.651290 0.581992 0.418008 0.730004 0.269996 0.770021 0.229979 0.490057 0.509943 0.502822 0.497178 0.577130 0.422870 0.375058 0.624942</probabilities>
+        </cpt>
+        <cpt id="L6_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N10 L5_N14</parents>
+            <probabilities>0.360025 0.639975 0.699221 0.300779 0.291022 0.708978 0.757598 0.242402</probabilities>
+        </cpt>
+        <cpt id="L6_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N0 L5_N11</parents>
+            <probabilities>0.537256 0.462744 0.733599 0.266401 0.232806 0.767194 0.639817 0.360183</probabilities>
+        </cpt>
+        <cpt id="L6_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N13</parents>
+            <probabilities>0.265401 0.734599 0.709984 0.290016</probabilities>
+        </cpt>
+        <cpt id="L6_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N7</parents>
+            <probabilities>0.303245 0.696755 0.194987 0.805013</probabilities>
+        </cpt>
+        <cpt id="L6_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N3</parents>
+            <probabilities>0.378421 0.621579 0.541122 0.458878</probabilities>
+        </cpt>
+        <cpt id="L6_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N15 L5_N7</parents>
+            <probabilities>0.838398 0.161602 0.478042 0.521958 0.562392 0.437608 0.124492 0.875508</probabilities>
+        </cpt>
+        <cpt id="L6_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N1 L5_N9</parents>
+            <probabilities>0.366984 0.633016 0.544802 0.455198 0.708505 0.291495 0.242506 0.757494</probabilities>
+        </cpt>
+        <cpt id="L6_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N7</parents>
+            <probabilities>0.623345 0.376655 0.715282 0.284718</probabilities>
+        </cpt>
+        <cpt id="L6_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N19 L5_N13</parents>
+            <probabilities>0.536476 0.463524 0.614768 0.385232 0.637895 0.362105 0.281786 0.718214</probabilities>
+        </cpt>
+        <cpt id="L6_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N5 L5_N7 L5_N13</parents>
+            <probabilities>0.346749 0.653251 0.115703 0.884297 0.623466 0.376534 0.549973 0.450027 0.413740 0.586260 0.681148 0.318852 0.835297 0.164703 0.320374 0.679626</probabilities>
+        </cpt>
+        <cpt id="L6_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N19</parents>
+            <probabilities>0.112548 0.887452 0.354260 0.645740</probabilities>
+        </cpt>
+        <cpt id="L6_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N2 L5_N8</parents>
+            <probabilities>0.603332 0.396668 0.706216 0.293784 0.138605 0.861395 0.127735 0.872265</probabilities>
+        </cpt>
+        <cpt id="L6_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N9</parents>
+            <probabilities>0.875137 0.124863 0.632488 0.367512</probabilities>
+        </cpt>
+        <cpt id="L6_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N1 L5_N13</parents>
+            <probabilities>0.110492 0.889508 0.276021 0.723979 0.814569 0.185431 0.409848 0.590152</probabilities>
+        </cpt>
+        <cpt id="L6_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N15 L5_N10</parents>
+            <probabilities>0.336609 0.663391 0.319780 0.680220 0.205914 0.794086 0.174285 0.825715</probabilities>
+        </cpt>
+        <cpt id="L6_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N15</parents>
+            <probabilities>0.732167 0.267833 0.861470 0.138530</probabilities>
+        </cpt>
+        <cpt id="L6_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N12 L5_N3</parents>
+            <probabilities>0.840099 0.159901 0.204091 0.795909 0.204441 0.795559 0.858021 0.141979</probabilities>
+        </cpt>
+        <cpt id="L6_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L5_N6 L5_N7 L5_N4</parents>
+            <probabilities>0.698863 0.301137 0.218888 0.781112 0.151857 0.848143 0.298570 0.701430 0.420055 0.579945 0.362734 0.637266 0.694871 0.305129 0.392932 0.607068</probabilities>
+        </cpt>
+        <cpt id="L7_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N1</parents>
+            <probabilities>0.121093 0.878907 0.346504 0.653496</probabilities>
+        </cpt>
+        <cpt id="L7_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N5 L6_N2</parents>
+            <probabilities>0.637433 0.362567 0.560936 0.439064 0.643338 0.356662 0.522742 0.477258</probabilities>
+        </cpt>
+        <cpt id="L7_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N16 L6_N19 L6_N10</parents>
+            <probabilities>0.124858 0.875142 0.423937 0.576063 0.497300 0.502700 0.631192 0.368808 0.682621 0.317379 0.160246 0.839754 0.620166 0.379834 0.667643 0.332357</probabilities>
+        </cpt>
+        <cpt id="L7_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N14</parents>
+            <probabilities>0.658527 0.341473 0.690725 0.309275</probabilities>
+        </cpt>
+        <cpt id="L7_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N7 L6_N16 L6_N6</parents>
+            <probabilities>0.143185 0.856815 0.535415 0.464585 0.386997 0.613003 0.846730 0.153270 0.570073 0.429927 0.553274 0.446726 0.791092 0.208908 0.642158 0.357842</probabilities>
+        </cpt>
+        <cpt id="L7_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N7 L6_N9</parents>
+            <probabilities>0.747168 0.252832 0.825584 0.174416 0.321540 0.678460 0.852345 0.147655</probabilities>
+        </cpt>
+        <cpt id="L7_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N0 L6_N5 L6_N10</parents>
+            <probabilities>0.820080 0.179920 0.132393 0.867607 0.393226 0.606774 0.850908 0.149092 0.390166 0.609834 0.143579 0.856421 0.881207 0.118793 0.634945 0.365055</probabilities>
+        </cpt>
+        <cpt id="L7_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N16 L6_N8 L6_N15</parents>
+            <probabilities>0.493609 0.506391 0.243691 0.756309 0.175792 0.824208 0.482883 0.517117 0.212080 0.787920 0.146631 0.853369 0.859089 0.140911 0.878226 0.121774</probabilities>
+        </cpt>
+        <cpt id="L7_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N7 L6_N3</parents>
+            <probabilities>0.355420 0.644580 0.185710 0.814290 0.564749 0.435251 0.301665 0.698335</probabilities>
+        </cpt>
+        <cpt id="L7_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N3 L6_N15</parents>
+            <probabilities>0.759388 0.240612 0.868324 0.131676 0.892240 0.107760 0.734229 0.265771</probabilities>
+        </cpt>
+        <cpt id="L7_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N11 L6_N10 L6_N15</parents>
+            <probabilities>0.774816 0.225184 0.589429 0.410571 0.556190 0.443810 0.826653 0.173347 0.320924 0.679076 0.883382 0.116618 0.828544 0.171456 0.127389 0.872611</probabilities>
+        </cpt>
+        <cpt id="L7_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N16 L6_N18</parents>
+            <probabilities>0.344672 0.655328 0.738741 0.261259 0.173382 0.826618 0.760833 0.239167</probabilities>
+        </cpt>
+        <cpt id="L7_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N5 L6_N14 L6_N13</parents>
+            <probabilities>0.341882 0.658118 0.103032 0.896968 0.599601 0.400399 0.264464 0.735536 0.337120 0.662880 0.797787 0.202213 0.768728 0.231272 0.115548 0.884452</probabilities>
+        </cpt>
+        <cpt id="L7_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N19</parents>
+            <probabilities>0.298644 0.701356 0.281668 0.718332</probabilities>
+        </cpt>
+        <cpt id="L7_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N7</parents>
+            <probabilities>0.631143 0.368857 0.265131 0.734869</probabilities>
+        </cpt>
+        <cpt id="L7_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N16</parents>
+            <probabilities>0.772760 0.227240 0.176675 0.823325</probabilities>
+        </cpt>
+        <cpt id="L7_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N12</parents>
+            <probabilities>0.735215 0.264785 0.603194 0.396806</probabilities>
+        </cpt>
+        <cpt id="L7_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N19 L6_N3</parents>
+            <probabilities>0.241110 0.758890 0.414976 0.585024 0.718009 0.281991 0.544500 0.455500</probabilities>
+        </cpt>
+        <cpt id="L7_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N16 L6_N9</parents>
+            <probabilities>0.142829 0.857171 0.385123 0.614877 0.879975 0.120025 0.192365 0.807635</probabilities>
+        </cpt>
+        <cpt id="L7_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L6_N16</parents>
+            <probabilities>0.616260 0.383740 0.823198 0.176802</probabilities>
+        </cpt>
+        <cpt id="L8_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N0 L7_N16</parents>
+            <probabilities>0.652863 0.347137 0.294780 0.705220 0.276801 0.723199 0.421016 0.578984</probabilities>
+        </cpt>
+        <cpt id="L8_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N13 L7_N10</parents>
+            <probabilities>0.736670 0.263330 0.667294 0.332706 0.160155 0.839845 0.173979 0.826021</probabilities>
+        </cpt>
+        <cpt id="L8_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N8</parents>
+            <probabilities>0.228748 0.771252 0.173858 0.826142</probabilities>
+        </cpt>
+        <cpt id="L8_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N1 L7_N10</parents>
+            <probabilities>0.818592 0.181408 0.425676 0.574324 0.188155 0.811845 0.287184 0.712816</probabilities>
+        </cpt>
+        <cpt id="L8_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N3</parents>
+            <probabilities>0.786820 0.213180 0.816032 0.183968</probabilities>
+        </cpt>
+        <cpt id="L8_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N0</parents>
+            <probabilities>0.460811 0.539189 0.160205 0.839795</probabilities>
+        </cpt>
+        <cpt id="L8_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N5</parents>
+            <probabilities>0.868291 0.131709 0.556746 0.443254</probabilities>
+        </cpt>
+        <cpt id="L8_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N14 L7_N11</parents>
+            <probabilities>0.304664 0.695336 0.425520 0.574480 0.222432 0.777568 0.848380 0.151620</probabilities>
+        </cpt>
+        <cpt id="L8_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N1</parents>
+            <probabilities>0.372755 0.627245 0.700707 0.299293</probabilities>
+        </cpt>
+        <cpt id="L8_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N5 L7_N10</parents>
+            <probabilities>0.321110 0.678890 0.787619 0.212381 0.467796 0.532204 0.346520 0.653480</probabilities>
+        </cpt>
+        <cpt id="L8_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N5</parents>
+            <probabilities>0.832046 0.167954 0.697046 0.302954</probabilities>
+        </cpt>
+        <cpt id="L8_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N2</parents>
+            <probabilities>0.630432 0.369568 0.604699 0.395301</probabilities>
+        </cpt>
+        <cpt id="L8_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N8 L7_N9</parents>
+            <probabilities>0.192624 0.807376 0.240764 0.759236 0.273924 0.726076 0.785405 0.214595</probabilities>
+        </cpt>
+        <cpt id="L8_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N0 L7_N17</parents>
+            <probabilities>0.232680 0.767320 0.852621 0.147379 0.681991 0.318009 0.399954 0.600046</probabilities>
+        </cpt>
+        <cpt id="L8_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N5 L7_N1</parents>
+            <probabilities>0.548140 0.451860 0.193992 0.806008 0.152383 0.847617 0.622537 0.377463</probabilities>
+        </cpt>
+        <cpt id="L8_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N11</parents>
+            <probabilities>0.542113 0.457887 0.449337 0.550663</probabilities>
+        </cpt>
+        <cpt id="L8_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N0 L7_N13</parents>
+            <probabilities>0.314758 0.685242 0.878393 0.121607 0.300872 0.699128 0.633836 0.366164</probabilities>
+        </cpt>
+        <cpt id="L8_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N13</parents>
+            <probabilities>0.516406 0.483594 0.582280 0.417720</probabilities>
+        </cpt>
+        <cpt id="L8_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N16 L7_N11 L7_N18</parents>
+            <probabilities>0.812754 0.187246 0.481353 0.518647 0.112556 0.887444 0.733063 0.266937 0.555488 0.444512 0.339161 0.660839 0.474996 0.525004 0.699458 0.300542</probabilities>
+        </cpt>
+        <cpt id="L8_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L7_N8 L7_N19 L7_N11</parents>
+            <probabilities>0.234477 0.765523 0.501235 0.498765 0.683316 0.316684 0.102256 0.897744 0.205103 0.794897 0.370787 0.629213 0.272335 0.727665 0.602831 0.397169</probabilities>
+        </cpt>
+        <cpt id="L9_N0">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N2</parents>
+            <probabilities>0.665732 0.334268 0.734672 0.265328</probabilities>
+        </cpt>
+        <cpt id="L9_N1">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N8 L8_N10 L8_N19</parents>
+            <probabilities>0.804198 0.195802 0.693829 0.306171 0.119531 0.880469 0.493588 0.506412 0.509385 0.490615 0.456834 0.543166 0.411402 0.588598 0.541985 0.458015</probabilities>
+        </cpt>
+        <cpt id="L9_N2">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N9</parents>
+            <probabilities>0.190938 0.809062 0.223549 0.776451</probabilities>
+        </cpt>
+        <cpt id="L9_N3">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N7</parents>
+            <probabilities>0.480197 0.519803 0.336732 0.663268</probabilities>
+        </cpt>
+        <cpt id="L9_N4">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N17 L8_N11 L8_N1</parents>
+            <probabilities>0.881915 0.118085 0.785933 0.214067 0.648236 0.351764 0.386811 0.613189 0.438857 0.561143 0.250462 0.749538 0.755295 0.244705 0.220126 0.779874</probabilities>
+        </cpt>
+        <cpt id="L9_N5">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N10 L8_N12 L8_N11</parents>
+            <probabilities>0.814674 0.185326 0.841067 0.158933 0.137208 0.862792 0.241459 0.758541 0.225952 0.774048 0.786957 0.213043 0.592812 0.407188 0.341100 0.658900</probabilities>
+        </cpt>
+        <cpt id="L9_N6">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N1</parents>
+            <probabilities>0.134895 0.865105 0.273675 0.726325</probabilities>
+        </cpt>
+        <cpt id="L9_N7">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N12 L8_N1</parents>
+            <probabilities>0.479414 0.520586 0.369399 0.630601 0.401418 0.598582 0.539479 0.460521</probabilities>
+        </cpt>
+        <cpt id="L9_N8">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N1</parents>
+            <probabilities>0.599283 0.400717 0.790744 0.209256</probabilities>
+        </cpt>
+        <cpt id="L9_N9">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N0 L8_N7 L8_N1</parents>
+            <probabilities>0.351042 0.648958 0.735057 0.264943 0.863712 0.136288 0.374783 0.625217 0.206788 0.793212 0.525284 0.474716 0.735038 0.264962 0.460299 0.539701</probabilities>
+        </cpt>
+        <cpt id="L9_N10">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N8 L8_N17</parents>
+            <probabilities>0.347419 0.652581 0.704404 0.295596 0.440033 0.559967 0.230511 0.769489</probabilities>
+        </cpt>
+        <cpt id="L9_N11">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N14 L8_N0</parents>
+            <probabilities>0.680905 0.319095 0.207150 0.792850 0.559305 0.440695 0.437271 0.562729</probabilities>
+        </cpt>
+        <cpt id="L9_N12">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N1 L8_N14</parents>
+            <probabilities>0.468002 0.531998 0.188046 0.811954 0.886505 0.113495 0.880950 0.119050</probabilities>
+        </cpt>
+        <cpt id="L9_N13">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N10 L8_N1 L8_N0</parents>
+            <probabilities>0.570854 0.429146 0.319782 0.680218 0.588960 0.411040 0.701251 0.298749 0.163269 0.836731 0.195778 0.804222 0.250408 0.749592 0.546009 0.453991</probabilities>
+        </cpt>
+        <cpt id="L9_N14">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N0 L8_N4 L8_N11</parents>
+            <probabilities>0.780740 0.219260 0.695976 0.304024 0.273008 0.726992 0.878704 0.121296 0.278470 0.721530 0.214245 0.785755 0.654630 0.345370 0.481083 0.518917</probabilities>
+        </cpt>
+        <cpt id="L9_N15">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N9 L8_N10</parents>
+            <probabilities>0.304062 0.695938 0.846386 0.153614 0.289001 0.710999 0.662004 0.337996</probabilities>
+        </cpt>
+        <cpt id="L9_N16">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N12</parents>
+            <probabilities>0.102384 0.897616 0.584193 0.415807</probabilities>
+        </cpt>
+        <cpt id="L9_N17">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N12</parents>
+            <probabilities>0.470632 0.529368 0.756694 0.243306</probabilities>
+        </cpt>
+        <cpt id="L9_N18">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N17 L8_N1</parents>
+            <probabilities>0.169198 0.830802 0.629403 0.370597 0.510289 0.489711 0.813341 0.186659</probabilities>
+        </cpt>
+        <cpt id="L9_N19">
+            <state id="State0"/>
+            <state id="State1"/>
+            <parents>L8_N12</parents>
+            <probabilities>0.149832 0.850168 0.456443 0.543557</probabilities>
+        </cpt>
+    </nodes>
+</smile>

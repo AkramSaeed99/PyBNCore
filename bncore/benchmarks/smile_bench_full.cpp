@@ -1,11 +1,11 @@
 // SMILE C++ Benchmark Runner
 // Reads standardized JSONL scenario files and reports timing per scenario set.
-// Build: clang++ -O3 -std=c++11 smile_bench_full.cpp -I../../smile_cpp
-// -L../../smile_cpp -lsmile -o smile_bench_full Run:   ./smile_bench_full
+// Build: clang++ -O3 -std=c++11 smile_bench_full.cpp -I../deps/smile_cpp
+// -L../deps/smile_cpp -lsmile -o smile_bench_full Run:   ./smile_bench_full
 // <network.xdsl> <scenarios.jsonl>
 
-#include "../../smile_cpp/smile.h"
-#include "../../smile_license (1)/smile_license.h"
+#include "../deps/smile_cpp/smile.h"
+#include "../deps/smile_license/smile_license.h"
 #include <chrono>
 #include <cstring>
 #include <fstream>

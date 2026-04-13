@@ -23,8 +23,10 @@ def _ensure_smile_binary(bin_path: Path, src_path: Path) -> None:
         "clang++",
         "-O3",
         "-std=c++14",
+        "-I", "../deps/smile_cpp",
+        "-I", "../deps/smile_license",
         str(src_path),
-        "../../smile_cpp/libsmile.a",
+        "../deps/smile_cpp/libsmile.a",
         "-o",
         str(bin_path),
     ]

@@ -85,6 +85,21 @@ public:
   void clear_soft_evidence();
 
   // ---------------------------------------------------------------------------
+  // Barren node pruning (B=1 optimization)
+  //
+  // Declares which variables will be queried after the next calibrate().
+  // Enables pruning: only cliques on paths from root to query cliques are
+  // processed during distribute/assemble, skipping barren subtrees.
+  //
+  // Contract: after set_query_scope + calibrate, only query variables that
+  // were declared in set_query_scope.  Querying other variables may return
+  // stale results.
+  //
+  // Pruning is only applied when B == 1 (single-row inference).
+  // ---------------------------------------------------------------------------
+  void set_query_scope(const NodeId *vars, std::size_t num_vars);
+
+  // ---------------------------------------------------------------------------
   // Sum-product calibration (standard marginal inference)
   // ---------------------------------------------------------------------------
   void calibrate();
@@ -213,6 +228,15 @@ private:
 
   // Query-time scratch for safe fallback when clique count exceeds stack guard.
   mutable std::vector<uint8_t> query_visited_scratch_;
+
+  // Barren node pruning state (B=1 optimization)
+  // query_relevant_[ci] = 1 iff clique ci is on the path from root to any
+  // query clique.  These cliques must be processed during distribute.
+  // is_query_clique_[ci] = 1 iff clique ci directly contains a query variable.
+  // These are the only cliques that need assembly for query extraction.
+  std::vector<uint8_t> query_relevant_;
+  std::vector<uint8_t> is_query_clique_;
+  bool has_query_scope_ = false;
 };
 
 } // namespace bncore

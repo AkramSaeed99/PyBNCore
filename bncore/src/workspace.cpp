@@ -555,6 +555,52 @@ void BatchWorkspace::clear_soft_evidence() {
 }
 
 // ---------------------------------------------------------------------------
+// Barren node pruning — set_query_scope
+//
+// Marks which cliques are on the path from root to any clique containing a
+// query variable.  Used by calibrate() B=1 path to skip distribute/assemble
+// for barren subtrees that don't contribute to the queried marginals.
+// ---------------------------------------------------------------------------
+void BatchWorkspace::set_query_scope(const NodeId *vars, std::size_t num_vars) {
+  const std::size_t n = jt_.cliques().size();
+
+  if (query_relevant_.size() != n) {
+    query_relevant_.resize(n, 0);
+    is_query_clique_.resize(n, 0);
+  }
+
+  std::memset(query_relevant_.data(), 0, n);
+  std::memset(is_query_clique_.data(), 0, n);
+
+  if (num_vars == 0) {
+    has_query_scope_ = false;
+    return;
+  }
+
+  // Mark cliques that directly contain query variables.
+  for (std::size_t i = 0; i < num_vars; ++i) {
+    auto it = node_to_clique_.find(vars[i]);
+    if (it != node_to_clique_.end()) {
+      is_query_clique_[it->second] = 1;
+    }
+  }
+
+  // Walk from each query clique to root, marking the path as relevant.
+  // Early-exit when hitting an already-marked ancestor (its path to root
+  // is already covered).
+  for (std::size_t ci = 0; ci < n; ++ci) {
+    if (!is_query_clique_[ci]) continue;
+    std::size_t u = ci;
+    while (u != ~std::size_t(0) && !query_relevant_[u]) {
+      query_relevant_[u] = 1;
+      u = parent_of_[u];
+    }
+  }
+
+  has_query_scope_ = true;
+}
+
+// ---------------------------------------------------------------------------
 // apply_soft_evidence_to_clique
 //
 // Applies soft evidence (or hard evidence converted to lambda vectors) to the
@@ -738,6 +784,9 @@ void BatchWorkspace::calibrate() {
         cal_changed_[u] = root_needs ? 1 : 0;
         continue;
       }
+      // Barren node pruning: skip cliques not on path to any query variable.
+      if (has_query_scope_ && !query_relevant_[u]) continue;
+
       std::size_t p = parent_of_[u];
       bool needs = ev_clique_[p] || down_changed_[p];
       for (std::size_t s : children_of_[p]) if (s != u && up_changed_[s]) { needs = true; break; }
@@ -771,6 +820,9 @@ void BatchWorkspace::calibrate() {
 
     // ── Assemble calibrated potentials ─────────────────────────────────────
     for (std::size_t i = 0; i < n; ++i) {
+      // Barren node pruning: only assemble cliques containing query variables.
+      if (has_query_scope_ && !is_query_clique_[i]) continue;
+
       if (!cal_changed_[i] && !is_first_calibration_) {
         std::copy(base_cal_buf_[i].begin(), base_cal_buf_[i].end(), cal_pot_buf_[i].begin());
         continue;
@@ -850,6 +902,8 @@ void BatchWorkspace::calibrate() {
         cal_changed_[u] = root_needs ? 1 : 0;
         continue;
       }
+      // Barren node pruning: skip cliques not on path to any query variable.
+      if (has_query_scope_ && !query_relevant_[u]) continue;
 
       std::size_t p = parent_of_[u];
       bool needs = ev_clique_[p] || down_changed_[p];
@@ -917,6 +971,9 @@ void BatchWorkspace::calibrate() {
 
     // ── Assemble calibrated potentials (batched) ───────────────────────────
     for (std::size_t i = 0; i < n; ++i) {
+      // Barren node pruning: only assemble cliques containing query variables.
+      if (has_query_scope_ && !is_query_clique_[i]) continue;
+
       if (!cal_changed_[i] && !is_first_calibration_) {
         std::copy(base_cal_buf_[i].begin(), base_cal_buf_[i].end(), cal_pot_buf_[i].begin());
         continue;
@@ -957,10 +1014,22 @@ void BatchWorkspace::calibrate() {
   }
 
   // ── Global inconsistency check ────────────────────────────────────────────
-  if (evidence_matrix_ && B == 1 && root_clique_ != ~std::size_t(0)) {
+  if (root_clique_ != ~std::size_t(0)) {
     double total = 0.0;
-    for (double v : cal_pot_buf_[root_clique_]) total += v;
-    if (total <= 0.0) throw std::invalid_argument("Inconsistent evidence");
+    bool has_nan = false;
+    for (double v : cal_pot_buf_[root_clique_]) {
+      if (std::isnan(v) || std::isinf(v)) { has_nan = true; break; }
+      total += v;
+    }
+    if (has_nan) {
+      throw std::invalid_argument(
+          "Numerical instability detected: NaN/Inf in calibrated potential. "
+          "This may indicate underflow in a deep network. Consider using "
+          "log-space calibration or checking CPT values.");
+    }
+    if (evidence_matrix_ && B == 1 && total <= 0.0) {
+      throw std::invalid_argument("Inconsistent evidence");
+    }
   }
 
   // ── Base snapshot on first calibration ───────────────────────────────────

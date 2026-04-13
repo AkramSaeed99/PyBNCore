@@ -70,7 +70,7 @@ def run_vectorized_validation(num_layers, nodes_per_layer, max_in_degree, batch_
     smile_bin = "./benchmark_smile_vector"
     print("\n>>> Compiling and Profiling Commercial Sequential C++ (SMILE Engine)")
     compilation = subprocess.run(
-        ["clang++", "-O3", "-std=c++14", "benchmark_smile_vector.cpp", "../../smile_cpp/libsmile.a", "-o", smile_bin],
+        ["clang++", "-O3", "-std=c++14", "benchmark_smile_vector.cpp", "../deps/smile_cpp/libsmile.a", "-o", smile_bin],
         capture_output=True, text=True
     )
     if compilation.returncode != 0:

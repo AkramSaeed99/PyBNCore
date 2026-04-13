@@ -22,6 +22,11 @@ public:
   void set_cpt(NodeId id, const std::vector<double> &cpt);
   void set_cpt(const std::string &name, const std::vector<double> &cpt);
 
+  // Validate all CPTs: check [0,1] bounds, sum-to-1 per conditional row,
+  // and no NaN/Inf values.  Throws std::invalid_argument on first violation.
+  // tolerance is the allowed deviation from 1.0 for row sums.
+  void validate_cpts(double tolerance = 1e-6) const;
+
   [[nodiscard]] const VariableMetadata &get_variable(NodeId id) const;
   [[nodiscard]] const VariableMetadata &
   get_variable(const std::string &name) const;

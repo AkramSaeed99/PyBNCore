@@ -7,7 +7,7 @@ def run_parameter_benchmark():
     cmd = [
         "clang++", "-O3", "-std=c++14", 
         "benchmark_smile_epistemic.cpp", 
-        "../../smile_cpp/libsmile.a", 
+        "../deps/smile_cpp/libsmile.a", 
         "-o", "benchmark_smile_epistemic"
     ]
     subprocess.run(cmd, check=True)

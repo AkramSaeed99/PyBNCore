@@ -55,9 +55,18 @@ NB_MODULE(_core, m) {
             std::vector<double> probs(cpt.data(), cpt.data() + cpt.size());
             g.set_cpt(name, probs);
           },
-          nb::arg("name"), nb::arg("cpt"));
+          nb::arg("name"), nb::arg("cpt"))
+      .def("validate_cpts", &bncore::Graph::validate_cpts,
+           nb::arg("tolerance") = 1e-6);
 
-  nb::class_<bncore::JunctionTree>(m, "JunctionTree");
+  nb::class_<bncore::JunctionTree::Stats>(m, "JunctionTreeStats")
+      .def_ro("num_cliques", &bncore::JunctionTree::Stats::num_cliques)
+      .def_ro("max_clique_size", &bncore::JunctionTree::Stats::max_clique_size)
+      .def_ro("treewidth", &bncore::JunctionTree::Stats::treewidth)
+      .def_ro("total_table_entries", &bncore::JunctionTree::Stats::total_table_entries);
+
+  nb::class_<bncore::JunctionTree>(m, "JunctionTree")
+      .def("stats", &bncore::JunctionTree::stats);
 
   nb::class_<bncore::JunctionTreeCompiler>(m, "JunctionTreeCompiler")
       .def_static(
