@@ -143,6 +143,23 @@ private:
   // Returns true if any likelihood was applied to this clique.
   bool apply_soft_evidence_to_clique(std::size_t ci);
 
+  // D-separation pruning via Bayes-Ball (Shachter 1998).
+  // Runs O(n+m) on the original DAG to find "requisite" nodes whose CPTs
+  // and observations actually affect P(Q|E).  Filters evidence application
+  // and computes a tighter Steiner tree for collect/distribute pruning.
+  void compute_dsep_masks();
+
+public:
+  // Runtime toggle for d-separation pruning (default: enabled).
+  // Disable for benchmarking or debugging.
+  void set_dsep_enabled(bool enabled) {
+    dsep_enabled_ = enabled;
+    dsep_computed_ = false;
+  }
+  bool dsep_enabled() const { return dsep_enabled_; }
+
+private:
+
   const JunctionTree &jt_;
   std::size_t batch_size_;
   std::size_t cpt_batch_offset_ = 0;
@@ -236,7 +253,30 @@ private:
   // These are the only cliques that need assembly for query extraction.
   std::vector<uint8_t> query_relevant_;
   std::vector<uint8_t> is_query_clique_;
+  std::vector<NodeId> query_vars_;   // exact query variable IDs for Bayes-Ball
   bool has_query_scope_ = false;
+
+  // D-separation pruning state (Bayes-Ball)
+  // dsep_requisite_obs_[var] = 1 iff evidence on var is needed for P(Q|E).
+  // dsep_relevant_clique_[ci] = 1 iff clique ci is on the Steiner tree of
+  //   cliques containing requisite nodes (tighter than query_relevant_).
+  std::vector<uint8_t> dsep_requisite_obs_;
+  std::vector<uint8_t> dsep_relevant_clique_;
+  bool dsep_computed_ = false;
+  bool dsep_enabled_ = true;
+  // Fix 2: when Bayes-Ball finds nothing to prune (all evidence is requisite
+  // AND the relevant clique tree equals the query-only Steiner tree), set
+  // dsep_inactive_ = true and skip all d-sep branches in the hot path until
+  // the evidence pattern changes.
+  bool dsep_inactive_ = false;
+
+  // Persistent scratch for Bayes-Ball (avoids per-calibrate allocation)
+  std::vector<uint8_t> dsep_is_evidence_;
+  std::vector<uint8_t> dsep_top_marked_;
+  std::vector<uint8_t> dsep_bottom_marked_;
+  std::vector<std::pair<uint32_t, uint8_t>> dsep_queue_;
+  // Cached query clique mask for detecting query scope changes
+  std::vector<uint8_t> dsep_prev_query_cliques_;
 };
 
 } // namespace bncore

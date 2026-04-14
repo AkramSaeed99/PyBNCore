@@ -32,6 +32,7 @@ BatchWorkspace &BatchExecutionEngine::get_pooled_workspace(std::size_t thread_id
   }
   if (!workspace_pool_[thread_idx]) {
     workspace_pool_[thread_idx] = std::make_unique<BatchWorkspace>(jt_, chunk_size_);
+    workspace_pool_[thread_idx]->set_dsep_enabled(dsep_enabled_);
   }
   return *workspace_pool_[thread_idx];
 }
@@ -89,6 +90,7 @@ void BatchExecutionEngine::evaluate_multi(const int *evidence_data,
         single_workspace_batch_size_ != current_chunk_size) {
       single_workspace_cache_ =
           std::make_unique<BatchWorkspace>(jt_, current_chunk_size);
+      single_workspace_cache_->set_dsep_enabled(dsep_enabled_);
       single_workspace_batch_size_ = current_chunk_size;
     } else {
       single_workspace_cache_->reset(current_chunk_size, 0);
@@ -184,6 +186,7 @@ void BatchExecutionEngine::evaluate_map(const int *evidence_data,
   if (num_chunks == 1 && batch_size == 1) {
     if (!single_workspace_cache_ || single_workspace_batch_size_ != 1) {
       single_workspace_cache_ = std::make_unique<BatchWorkspace>(jt_, 1);
+      single_workspace_cache_->set_dsep_enabled(dsep_enabled_);
       single_workspace_batch_size_ = 1;
     } else {
       single_workspace_cache_->reset(1, 0);
@@ -257,6 +260,16 @@ void BatchExecutionEngine::invalidate_workspace_cache() {
   single_workspace_cache_.reset();
   single_workspace_batch_size_ = 0;
   workspace_pool_.clear();
+}
+
+void BatchExecutionEngine::set_dsep_enabled(bool enabled) {
+  dsep_enabled_ = enabled;
+  if (single_workspace_cache_) {
+    single_workspace_cache_->set_dsep_enabled(enabled);
+  }
+  for (auto &ws : workspace_pool_) {
+    if (ws) ws->set_dsep_enabled(enabled);
+  }
 }
 
 void BatchExecutionEngine::set_soft_evidence(bncore::NodeId var, const double *likelihoods, std::size_t n_states) {

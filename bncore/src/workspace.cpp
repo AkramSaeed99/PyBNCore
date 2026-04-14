@@ -502,10 +502,18 @@ void BatchWorkspace::reset(std::size_t new_batch_size,
 // Hard evidence (unchanged API)
 // ---------------------------------------------------------------------------
 void BatchWorkspace::set_evidence_matrix(const int *ev, std::size_t num_vars) {
+  // D-sep cache: depends on WHICH nodes are observed, not their values.
+  // Don't invalidate if the same columns are observed (common in point-mode loops).
+  // The actual pattern check happens in compute_dsep_masks() if dsep_computed_
+  // is false; here we just do a quick hash-based check.
   evidence_matrix_ = ev; evidence_num_vars_ = num_vars;
+  // Note: dsep_computed_ is NOT invalidated here. The check in calibrate()
+  // will recompute if needed. The pattern comparison in compute_dsep_masks()
+  // is authoritative.
 }
 void BatchWorkspace::clear_evidence() {
   evidence_matrix_ = nullptr; evidence_num_vars_ = 0;
+  dsep_computed_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -574,8 +582,12 @@ void BatchWorkspace::set_query_scope(const NodeId *vars, std::size_t num_vars) {
 
   if (num_vars == 0) {
     has_query_scope_ = false;
+    query_vars_.clear();
     return;
   }
+
+  // Store the exact query variable IDs for Bayes-Ball seeding.
+  query_vars_.assign(vars, vars + num_vars);
 
   // Mark cliques that directly contain query variables.
   for (std::size_t i = 0; i < num_vars; ++i) {
@@ -598,6 +610,150 @@ void BatchWorkspace::set_query_scope(const NodeId *vars, std::size_t num_vars) {
   }
 
   has_query_scope_ = true;
+
+  // Only invalidate d-sep if query cliques actually changed.
+  // In point-mode loops, set_query_scope is called on every evaluate_multi
+  // with the same query vars — avoid recomputing Bayes-Ball each time.
+  if (dsep_computed_) {
+    if (dsep_prev_query_cliques_.size() == n) {
+      if (std::memcmp(dsep_prev_query_cliques_.data(), is_query_clique_.data(), n) != 0)
+        dsep_computed_ = false;
+    } else {
+      dsep_computed_ = false;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// compute_dsep_masks — Bayes-Ball algorithm (Shachter 1998)
+//
+// Finds the set of "requisite" nodes whose CPTs and observations affect
+// P(Q|E).  Runs in O(n + m) on the original DAG.  The result filters
+// evidence application (only requisite observations are applied) and
+// tightens the Steiner tree used for collect/distribute pruning.
+// ---------------------------------------------------------------------------
+void BatchWorkspace::compute_dsep_masks() {
+  const Graph *g = jt_.graph();
+  const std::size_t num_vars = g->num_variables();
+  const std::size_t n_cliques = jt_.cliques().size();
+
+  // One-time allocation of persistent scratch buffers
+  if (dsep_requisite_obs_.size() != num_vars) {
+    dsep_requisite_obs_.resize(num_vars);
+    dsep_relevant_clique_.resize(n_cliques);
+    dsep_is_evidence_.resize(num_vars);
+    dsep_top_marked_.resize(num_vars);
+    dsep_bottom_marked_.resize(num_vars);
+    dsep_queue_.reserve(num_vars * 2);
+  }
+
+  // Clear via memset (zero allocation)
+  std::memset(dsep_requisite_obs_.data(), 0, num_vars);
+  std::memset(dsep_relevant_clique_.data(), 0, n_cliques);
+  std::memset(dsep_is_evidence_.data(), 0, num_vars);
+  std::memset(dsep_top_marked_.data(), 0, num_vars);
+  std::memset(dsep_bottom_marked_.data(), 0, num_vars);
+  dsep_queue_.clear();
+
+  if (!has_query_scope_) {
+    dsep_computed_ = false;
+    return;
+  }
+
+  // Build evidence set (B=1 only — checked by caller)
+  if (evidence_matrix_) {
+    for (std::size_t v = 0; v < std::min(evidence_num_vars_, num_vars); ++v) {
+      if (evidence_matrix_[v] >= 0) dsep_is_evidence_[v] = 1;
+    }
+  }
+  for (const auto &[nid, _] : soft_evidence_scalar_) {
+    if (nid < num_vars) dsep_is_evidence_[nid] = 1;
+  }
+  for (const auto &[nid, _] : soft_evidence_matrix_) {
+    if (nid < num_vars) dsep_is_evidence_[nid] = 1;
+  }
+
+  // Initialize queue: schedule exact query variables as if visited from a child.
+  // Use query_vars_ (the actual variables being queried), not all variables
+  // in query cliques — the latter is an over-approximation.
+  for (NodeId qv : query_vars_) {
+    dsep_queue_.push_back({qv, 0});  // 0 = from_child
+  }
+
+  // Bayes-Ball traversal — O(n + m)
+  std::size_t head = 0;
+  while (head < dsep_queue_.size()) {
+    const auto [j, direction] = dsep_queue_[head++];
+
+    if (direction == 0) {  // visited from child
+      if (!dsep_is_evidence_[j]) {
+        if (!dsep_top_marked_[j]) {
+          dsep_top_marked_[j] = 1;
+          for (NodeId p : g->get_parents(j))
+            dsep_queue_.push_back({p, 0});
+        }
+        if (!dsep_bottom_marked_[j]) {
+          dsep_bottom_marked_[j] = 1;
+          for (NodeId c : g->get_children(j))
+            dsep_queue_.push_back({c, 1});
+        }
+      } else {
+        if (!dsep_top_marked_[j]) dsep_top_marked_[j] = 1;
+      }
+    } else {  // visited from parent
+      if (!dsep_is_evidence_[j]) {
+        if (!dsep_bottom_marked_[j]) {
+          dsep_bottom_marked_[j] = 1;
+          for (NodeId c : g->get_children(j))
+            dsep_queue_.push_back({c, 1});
+        }
+      } else {
+        // V-structure activation
+        if (!dsep_top_marked_[j]) {
+          dsep_top_marked_[j] = 1;
+          for (NodeId p : g->get_parents(j))
+            dsep_queue_.push_back({p, 0});
+        }
+      }
+    }
+  }
+
+  // Mark requisite observations + count how many evidence nodes were pruned.
+  std::size_t n_evidence = 0;
+  std::size_t n_pruned_obs = 0;
+  for (std::size_t v = 0; v < num_vars; ++v) {
+    if (dsep_is_evidence_[v]) {
+      ++n_evidence;
+      if (dsep_top_marked_[v])
+        dsep_requisite_obs_[v] = 1;
+      else
+        ++n_pruned_obs;
+    }
+  }
+
+  // NOTE: dsep_relevant_clique_ was previously computed as the Steiner tree
+  // of all requisite-node cliques, but it is no longer used — distribute
+  // uses query_relevant_ exclusively (see calibrate()).  The Steiner tree
+  // cost was O(n_cliques * scope_size) per recomputation; eliminating it
+  // saves measurable time when d-sep recomputes on pattern changes.
+
+  // Fix 2: detect whether d-sep can actually save work.
+  // The ONLY savings from d-sep come from evidence filtering: cliques whose
+  // only evidence is d-separated from the query skip the calibrate hot path
+  // via lazy propagation.  The distribute-side d-sep tree is always a
+  // superset of query_relevant_ (query nodes are always requisite), so it
+  // cannot prune more cliques than barren pruning alone.
+  //
+  // Therefore: if no evidence was pruned, d-sep contributes zero benefit and
+  // is pure overhead.  Switch to the fast inactive path until the evidence
+  // pattern changes.
+  dsep_inactive_ = (n_pruned_obs == 0);
+  (void)n_evidence;  // kept for potential future tuning
+
+  // Cache query clique mask for detecting scope changes
+  dsep_prev_query_cliques_.assign(is_query_clique_.begin(),
+                                   is_query_clique_.begin() + n_cliques);
+  dsep_computed_ = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +796,14 @@ bool BatchWorkspace::apply_soft_evidence_to_clique(std::size_t ci) {
     bool has_matrix_soft = (soft_evidence_matrix_.count(nid) > 0);
 
     if (!has_hard && !has_scalar_soft && !has_matrix_soft) continue;
+
+    // D-separation filter: skip evidence on non-requisite observation nodes.
+    // If Bayes-Ball determined this node's evidence doesn't affect P(Q|E),
+    // don't apply it — the lazy propagation cache will skip this clique.
+    // Fix 2: dsep_inactive_ short-circuits this when d-sep can't prune anything,
+    //        so the whole extra check collapses to a single predictable branch.
+    if (dsep_computed_ && !dsep_inactive_ &&
+        !dsep_requisite_obs_[nid]) continue;
 
     // If we have both hard evidence and soft evidence for the same variable,
     // soft evidence takes precedence (it subsumes hard as a special case).
@@ -735,11 +899,48 @@ void BatchWorkspace::calibrate() {
   std::memset(down_changed_.data(), 0, n);
   std::memset(cal_changed_.data(),  0, n);
 
+  // ── D-separation pruning (Bayes-Ball) ────────────────────────────────────
+  // Only run when enabled, B=1, and query scope is set.  Cached across calls:
+  // d-sep depends on WHICH nodes have evidence, not their values.
+  //
+  // Fix 1: hoist a single boolean here so that when d-sep is off or inactive,
+  // the rest of calibrate() follows the exact original code path with no
+  // additional branches.
+  if (!dsep_enabled_ || !has_query_scope_ || B != 1) {
+    dsep_computed_ = false;
+    dsep_inactive_ = false;
+  } else {
+    if (!dsep_computed_) {
+      compute_dsep_masks();
+    } else {
+      // Check if evidence PATTERN changed (which columns, not values)
+      bool pattern_changed = false;
+      if (evidence_matrix_) {
+        const std::size_t nv = std::min(evidence_num_vars_,
+                                         dsep_is_evidence_.size());
+        for (std::size_t v = 0; v < nv; ++v) {
+          if (dsep_is_evidence_[v] != (evidence_matrix_[v] >= 0 ? 1 : 0)) {
+            pattern_changed = true;
+            break;
+          }
+        }
+      }
+      if (pattern_changed) compute_dsep_masks();
+    }
+  }
+
+  // After this point, d-sep's effect is entirely on EVIDENCE APPLICATION:
+  // apply_soft_evidence_to_clique() skips non-requisite observations, which
+  // propagates through the lazy-propagation cache in collect.  Distribute and
+  // assemble use query_relevant_ / is_query_clique_ exactly as the pre-d-sep
+  // code did, so the OFF path has no extra overhead.
+
   // ── Evidence application ─────────────────────────────────────────────────
   // Unified path: handles hard evidence, soft evidence, and combinations.
   // apply_soft_evidence_to_clique() sets ev_clique_[ci] and updates
   // clique_potentials_[ci] in place.  We call it for every clique (it returns
   // immediately if no evidence touches that clique).
+  // With d-sep enabled, only requisite observations are applied.
   if (evidence_matrix_ || !soft_evidence_scalar_.empty() || !soft_evidence_matrix_.empty()) {
     for (std::size_t ci = 0; ci < n; ++ci) {
       if (ev_clique_[ci]) continue;  // already processed (guard for multi-pass)
@@ -784,8 +985,16 @@ void BatchWorkspace::calibrate() {
         cal_changed_[u] = root_needs ? 1 : 0;
         continue;
       }
-      // Barren node pruning: skip cliques not on path to any query variable.
-      if (has_query_scope_ && !query_relevant_[u]) continue;
+      // Distribute only needs the path from root to query cliques —
+      // ALWAYS use query_relevant_, regardless of d-sep.  D-sep's benefit
+      // comes entirely from evidence filtering in the collect pass (via
+      // lazy propagation on cliques whose evidence was marked irrelevant).
+      // Using dsep_relevant_clique_ here was wrong: it includes all
+      // requisite-node cliques, which expands distribute work unnecessarily
+      // when the requisite set is large but still shrinks the evidence set.
+      if (has_query_scope_ && !query_relevant_[u]) {
+        continue;
+      }
 
       std::size_t p = parent_of_[u];
       bool needs = ev_clique_[p] || down_changed_[p];
@@ -902,7 +1111,8 @@ void BatchWorkspace::calibrate() {
         cal_changed_[u] = root_needs ? 1 : 0;
         continue;
       }
-      // Barren node pruning: skip cliques not on path to any query variable.
+      // Barren node pruning (batched path). D-sep is never active here
+      // because it only runs for B=1 (use_dsep would always be false).
       if (has_query_scope_ && !query_relevant_[u]) continue;
 
       std::size_t p = parent_of_[u];

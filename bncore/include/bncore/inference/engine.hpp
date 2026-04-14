@@ -41,6 +41,12 @@ public:
 
   void invalidate_workspace_cache();
 
+  // Runtime toggle for d-separation pruning (default: enabled).
+  // Applies to all workspaces created by this engine. Primarily for
+  // benchmarking the impact of Bayes-Ball pruning.
+  void set_dsep_enabled(bool enabled);
+  bool dsep_enabled() const { return dsep_enabled_; }
+
   const JunctionTree &junction_tree() const { return jt_; }
 
 private:
@@ -56,6 +62,7 @@ private:
   std::size_t chunk_size_;
   std::unique_ptr<BatchWorkspace> single_workspace_cache_;
   std::size_t single_workspace_batch_size_ = 0;
+  bool dsep_enabled_ = true;
 
   // Persistent thread pool — eliminates per-call thread creation overhead
   std::unique_ptr<ThreadPool> thread_pool_;
