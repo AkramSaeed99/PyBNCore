@@ -77,19 +77,23 @@ def _parse_smile_time(stdout: str) -> float:
 # ---------------------------------------------------------------------------
 # Evidence generation
 # ---------------------------------------------------------------------------
-def make_evidence(num_rows, num_vars, density, seed=42):
+def make_evidence(num_rows, num_vars, density, seed=42, exclude_cols=None):
     """Generate random binary evidence matrix.
 
     Args:
         density: fraction of variables observed (0.0 to 1.0)
+        exclude_cols: column indices that must NOT be observed (e.g. query vars)
     Returns:
         evidence: int32 array (num_rows, num_vars), -1 = unobserved
         ev_cols: list of observed column indices
     """
     rng = np.random.default_rng(seed)
     evidence = np.full((num_rows, num_vars), -1, dtype=np.int32)
-    n_ev = max(1, int(density * num_vars))
-    cols = rng.choice(np.arange(num_vars), size=n_ev, replace=False)
+    candidates = np.arange(num_vars)
+    if exclude_cols is not None:
+        candidates = np.setdiff1d(candidates, exclude_cols)
+    n_ev = max(1, min(int(density * num_vars), len(candidates)))
+    cols = rng.choice(candidates, size=n_ev, replace=False)
     for c in cols:
         evidence[:, int(c)] = rng.integers(0, 2, size=num_rows, dtype=np.int32)
     return evidence, sorted(int(c) for c in cols)
@@ -200,9 +204,12 @@ def bench_evidence_density(graph, xdsl_path, var_names,
     n_states = len(graph.get_variable(target_name).states)
     offsets = np.array([0, n_states], dtype=np.int64)
 
+    target_id = int(graph.get_variable(target_name).id)
+
     for density in [0.05, 0.15, 0.50]:
         label = f"{int(density*100)}% evidence"
-        evidence, ev_cols = make_evidence(num_rows, num_vars, density, seed=42)
+        evidence, ev_cols = make_evidence(num_rows, num_vars, density, seed=42,
+                                          exclude_cols=[target_id])
 
         jt = bn.JunctionTreeCompiler.compile(graph, heuristic="min_weight")
         engine = bn.BatchExecutionEngine(jt, num_threads=1, chunk_size=1)
@@ -237,8 +244,11 @@ def bench_batch_scaling(graph, xdsl_path, var_names,
     n_states = len(graph.get_variable(target_name).states)
     offsets = np.array([0, n_states], dtype=np.int64)
 
+    target_id = int(graph.get_variable(target_name).id)
+
     for batch_size in [1, 64, 1024, 50000]:
-        evidence, ev_cols = make_evidence(batch_size, num_vars, 0.05, seed=42)
+        evidence, ev_cols = make_evidence(batch_size, num_vars, 0.05, seed=42,
+                                          exclude_cols=[target_id])
 
         jt = bn.JunctionTreeCompiler.compile(graph, heuristic="min_weight")
 
@@ -288,8 +298,10 @@ def bench_network_size(bench_dir, smile_bin, repeats, out_rows):
         n_states = len(graph.get_variable(target_name).states)
         offsets = np.array([0, n_states], dtype=np.int64)
 
+        target_id = int(graph.get_variable(target_name).id)
         num_rows = 2000
-        evidence, ev_cols = make_evidence(num_rows, num_vars, 0.05, seed=42)
+        evidence, ev_cols = make_evidence(num_rows, num_vars, 0.05, seed=42,
+                                          exclude_cols=[target_id])
 
         jt = bn.JunctionTreeCompiler.compile(graph, heuristic="min_weight")
         engine = bn.BatchExecutionEngine(jt, num_threads=1, chunk_size=1)
@@ -319,8 +331,10 @@ def bench_heuristics(graph, xdsl_path, var_names, repeats, out_rows):
     """Compare triangulation heuristics on compilation + inference time."""
     num_vars = graph.num_variables()
     target_name = var_names[-1]
+    target_id = int(graph.get_variable(target_name).id)
     num_rows = 2000
-    evidence, _ = make_evidence(num_rows, num_vars, 0.05, seed=42)
+    evidence, _ = make_evidence(num_rows, num_vars, 0.05, seed=42,
+                                exclude_cols=[target_id])
 
     for heuristic in ["min_weight", "min_fill", "min_degree", "weighted_min_fill"]:
         # Measure compilation time
@@ -388,8 +402,10 @@ def main():
     else:
         print("\n  SMILE binary ready.\n")
 
-    # Default evidence
-    evidence, ev_cols = make_evidence(args.point_rows, num_vars, 0.05, seed=args.seed)
+    # Default evidence — exclude the last node (default query target)
+    target_id = int(graph.get_variable(var_names[-1]).id)
+    evidence, ev_cols = make_evidence(args.point_rows, num_vars, 0.05, seed=args.seed,
+                                      exclude_cols=[target_id])
     out_rows = []
 
     print("=" * 70)

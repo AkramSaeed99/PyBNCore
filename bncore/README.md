@@ -54,12 +54,20 @@ We expose explicit Py-Types. `nanobind` was adopted specifically for natively em
 Upon invoking `BatchExecutionEngine::evaluate` from Python, `nb::gil_scoped_release` drops the interpreter lock enabling instantaneous physical multithreading spanning available logical processors.
 
 ## 🛠️ Testing the Framework
-For execution reviews, checkout `examples/test_api.py`.
+
 ```bash
-# To test compilation and binding directly
-source .venv/bin/activate
+# Build and install the extension
 pip install -e .
-python examples/test_api.py
+
+# Run the full test suite
+pytest tests/ -v
+
+# Browse the example gallery
+python examples/01_hello_discrete.py              # classic rain/sprinkler
+python examples/02_sensitivity_and_voi.py         # sensitivity + VoI
+python examples/03_hybrid_gaussian_chain.py       # Kalman-like chain
+python examples/04_reliability_rare_event.py     # ⭐ PRA flagship example
+python examples/05_diagnostic_with_soft_evidence.py
 ```
 
 ## 🚀 Advanced Inference Features
@@ -89,6 +97,50 @@ rankings = wrapper.sensitivity_ranking(query_node="Patient_Status", query_state=
 # Rank observation candidates by Expected Entropy Reduction (Mutual Information)
 voi_scores = wrapper.value_of_information("Patient_Status", candidate_nodes=["Blood_Test", "X_Ray"])
 ```
+
+## 🧮 Hybrid Bayesian Networks (Continuous Variables)
+
+For models with continuous variables — loads, temperatures, degradation
+rates — `pybncore` implements the **Neil–Tailor–Marquez dynamic
+discretization** algorithm, with **Zhu-Collette rare-event reweighting**
+for reliability / PRA workloads.
+
+```python
+from pybncore import PyBNCoreWrapper
+
+w = PyBNCoreWrapper()
+
+# Continuous variables use type-specific registration
+w.add_lognormal("R", log_mu=-2.0, log_sigma=0.5, domain=(1e-4, 10.0),
+                rare_event_mode=True)
+w.add_normal   ("L", mu=5.0, sigma=1.0, domain=(0.0, 10.0))
+w.add_uniform  ("C", a=8.0, b=12.0, domain=(8.0, 12.0))
+
+# Functional / deterministic nodes: Y = f(parents)
+w.add_deterministic(
+    "stress", parents=["R", "L", "C"],
+    fn=lambda r, l, c: r * l / c,
+    domain=(0.0, 5.0),
+)
+
+# Rare-event threshold — forces an exact bin edge at 0.8
+w.add_threshold("stress", 0.8)
+
+# Hard evidence by value (no manual bin-index arithmetic)
+w.set_continuous_evidence({"L": 5.5})
+
+# Run the DD outer loop and get a ContinuousPosterior back
+result = w.hybrid_query(["stress"])
+stress = result["stress"]
+
+p_fail = stress.prob_greater_than(0.8)   # tail-accurate rare-event probability
+mean   = stress.mean()
+q95    = stress.quantile(0.95)
+```
+
+See [**docs/dd_tutorial.md**](docs/dd_tutorial.md) for the full DD
+tutorial and [**examples/04_reliability_rare_event.py**](examples/04_reliability_rare_event.py)
+for an end-to-end PRA example.
 
 
 ## 📜 License

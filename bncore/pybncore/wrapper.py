@@ -1,8 +1,25 @@
 import numpy as np
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from ._core import Graph, JunctionTree, JunctionTreeCompiler, BatchExecutionEngine, VariableMetadata
+from ._core import (
+    BatchExecutionEngine,
+    DiscretizationManager,
+    Graph,
+    HybridEngine,
+    HybridRunConfig,
+    JunctionTree,
+    JunctionTreeCompiler,
+    VariableMetadata,
+)
+from ._hybrid import (
+    Param,
+    _as_float,
+    _validate_domain,
+    _validate_initial_bins,
+    _wrap_param,
+)
 from .io import read_xdsl
+from .posterior import ContinuousPosterior
 
 class PyBNCoreWrapper:
     """
@@ -24,7 +41,19 @@ class PyBNCoreWrapper:
         self._is_compiled = False
         self._num_threads = 0
         self._chunk_size = 1024
-        
+
+        # Hybrid / continuous variable state.  `_is_hybrid` toggles which
+        # engine `_compile()` constructs.  All continuous-variable metadata
+        # lives in `_discretization_manager` (created lazily on first
+        # add_* call); we also track the names of continuous variables so
+        # callback unpacking can distinguish them from discrete ones.
+        self._is_hybrid: bool = False
+        self._discretization_manager: Optional[DiscretizationManager] = None
+        self._hybrid_engine: Optional[HybridEngine] = None
+        self._continuous_names: List[str] = []
+        self._continuous_evidence: Dict[str, float] = {}
+        self._continuous_likelihoods: Dict[str, Callable[[float], float]] = {}
+
         if model_path is not None:
             self.load(model_path)
 
@@ -54,10 +83,33 @@ class PyBNCoreWrapper:
                 self._node_states[name] = list(meta.states)
 
     def _compile(self) -> None:
-        # Keep the compiled junction tree alive for the entire engine lifetime.
-        # BatchExecutionEngine stores a reference internally.
-        self._jt = JunctionTreeCompiler.compile(self._graph, "min_fill")
-        self._engine = BatchExecutionEngine(self._jt, self._num_threads, self._chunk_size)
+        # Two code paths:
+        #   * Hybrid (continuous variables present): build a HybridEngine
+        #     that owns the DD outer loop.  The junction tree is recompiled
+        #     per iteration inside the hybrid engine, so we do NOT hold a
+        #     long-lived JT here.
+        #   * Purely discrete: standard path — compile the JT once and wrap
+        #     a BatchExecutionEngine around it.
+        if self._is_hybrid:
+            # Ensure every continuous variable's graph state count matches
+            # its registered bin count before handing over.
+            self._discretization_manager.initialize_graph(self._graph)
+            # Refresh cached state names (initialize_graph may have grown
+            # state lists to match the bin count).
+            self._cache_metadata()
+            self._hybrid_engine = HybridEngine(
+                self._graph, self._discretization_manager, self._num_threads
+            )
+            self._jt = None
+            self._engine = None
+        else:
+            # Keep the compiled junction tree alive for the entire engine lifetime.
+            # BatchExecutionEngine stores a reference internally.
+            self._jt = JunctionTreeCompiler.compile(self._graph, "min_fill")
+            self._engine = BatchExecutionEngine(
+                self._jt, self._num_threads, self._chunk_size
+            )
+            self._hybrid_engine = None
         self._is_compiled = True
         
     def nodes(self) -> List[str]:
@@ -386,6 +438,12 @@ class PyBNCoreWrapper:
         return float(pmf_dict[state])
 
     def batch_query_marginals(self, nodes: Sequence[str], evidence_matrix: Optional[np.ndarray] = None) -> Union[Dict[str, Dict[str, float]], Dict[str, np.ndarray]]:
+        if self._is_hybrid:
+            raise RuntimeError(
+                "This model contains continuous variables. "
+                "Use `wrapper.hybrid_query(nodes)` instead of "
+                "`batch_query_marginals` for hybrid models."
+            )
         if not self._is_compiled:
             self._compile()
 
@@ -790,3 +848,419 @@ class PyBNCoreWrapper:
                 
         results.sort(key=lambda x: x[1], reverse=True)
         return results
+
+    # ========================================================================
+    # Hybrid / Dynamic-Discretization API
+    # ========================================================================
+    # Each `add_*` method registers a continuous variable with a specific
+    # distribution family.  All registration methods follow the same pattern:
+    #   1. add the variable to the graph (placeholder states matching bins)
+    #   2. create the DiscretizationManager lazily on first use
+    #   3. wrap user callbacks so they take parent VALUES in declared order
+    #   4. register with the manager
+    #   5. invalidate compilation state
+    #
+    # After registration, users call :meth:`hybrid_query` to run the DD
+    # outer loop and get a dict of posteriors — :class:`ContinuousPosterior`
+    # for continuous variables, ``Dict[str, float]`` for discrete ones.
+
+    def _ensure_manager(self) -> DiscretizationManager:
+        if self._discretization_manager is None:
+            self._discretization_manager = DiscretizationManager(max_bins_per_var=40)
+        if self._graph is None:
+            self._graph = Graph()
+        self._is_hybrid = True
+        self._is_compiled = False
+        return self._discretization_manager
+
+    def _prepare_continuous_variable(self, name: str,
+                                       parents: Sequence[str],
+                                       initial_bins: int) -> int:
+        """Create the graph placeholder and validate parents.
+        Returns the assigned variable id."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("name must be a non-empty string")
+        if name in self._name_to_id:
+            raise ValueError(
+                f"variable '{name}' is already registered in the graph"
+            )
+        for p in parents:
+            if p not in self._name_to_id:
+                raise ValueError(
+                    f"parent '{p}' of '{name}' is not registered; "
+                    f"register parents first"
+                )
+        # Create placeholder states "b0", "b1", ...  `initialize_graph`
+        # later verifies these match the bin count.
+        placeholder_states = [f"b{i}" for i in range(initial_bins)]
+        var_id = self._graph.add_variable(name, placeholder_states)
+        for p in parents:
+            self._graph.add_edge(p, name)
+        self._cache_metadata()
+        self._continuous_names.append(name)
+        return int(var_id)
+
+    def add_normal(self, name: str, *,
+                    parents: Sequence[str] = (),
+                    mu: Param = 0.0,
+                    sigma: Param = 1.0,
+                    domain: Tuple[float, float],
+                    initial_bins: int = 8,
+                    rare_event_mode: bool = False) -> None:
+        """Register a continuous variable with a Normal distribution.
+
+        Parameters
+        ----------
+        name : str
+            Variable name.
+        parents : sequence of str, optional
+            Names of parent variables (already registered).  May be empty.
+        mu, sigma :
+            Either floats (constant parameters) or callables taking parent
+            values in declared order and returning a float.
+        domain : (float, float)
+            Support to discretize, e.g. ``(-4.0, 4.0)``.
+        initial_bins : int, default 8
+            Starting bin count; dynamic discretization will refine this.
+        rare_event_mode : bool, default False
+            Enable Zhu-Collette weighted refinement for tail accuracy.
+        """
+        ctx = f"add_normal({name!r})"
+        lo, hi = _validate_domain(domain, ctx)
+        ib = _validate_initial_bins(initial_bins, ctx)
+        dm = self._ensure_manager()
+        var_id = self._prepare_continuous_variable(name, parents, ib)
+        parent_ids = [self._name_to_id[p] for p in parents]
+        mu_fn = _wrap_param(mu, parents, self._continuous_names)
+        sigma_fn = _wrap_param(sigma, parents, self._continuous_names)
+        dm.register_normal(var_id=var_id, name=name, parents=parent_ids,
+                            mu_fn=mu_fn, sigma_fn=sigma_fn,
+                            domain_lo=lo, domain_hi=hi,
+                            initial_bins=ib, log_spaced=False,
+                            rare_event_mode=bool(rare_event_mode))
+
+    def add_lognormal(self, name: str, *,
+                       parents: Sequence[str] = (),
+                       log_mu: Param,
+                       log_sigma: Param,
+                       domain: Tuple[float, float],
+                       initial_bins: int = 8,
+                       log_spaced: bool = True,
+                       rare_event_mode: bool = False) -> None:
+        """Register a continuous variable with a LogNormal distribution."""
+        ctx = f"add_lognormal({name!r})"
+        lo, hi = _validate_domain(domain, ctx)
+        if lo <= 0.0:
+            raise ValueError(
+                f"{ctx}: LogNormal requires domain_lo > 0 (got {lo}); "
+                f"pass a small positive lower bound such as 1e-4"
+            )
+        ib = _validate_initial_bins(initial_bins, ctx)
+        dm = self._ensure_manager()
+        var_id = self._prepare_continuous_variable(name, parents, ib)
+        parent_ids = [self._name_to_id[p] for p in parents]
+        mu_fn = _wrap_param(log_mu, parents, self._continuous_names)
+        sigma_fn = _wrap_param(log_sigma, parents, self._continuous_names)
+        dm.register_lognormal(var_id=var_id, name=name, parents=parent_ids,
+                               log_mu_fn=mu_fn, log_sigma_fn=sigma_fn,
+                               domain_lo=lo, domain_hi=hi,
+                               initial_bins=ib, log_spaced=bool(log_spaced),
+                               rare_event_mode=bool(rare_event_mode))
+
+    def add_uniform(self, name: str, *,
+                     parents: Sequence[str] = (),
+                     a: Param,
+                     b: Param,
+                     domain: Tuple[float, float],
+                     initial_bins: int = 8) -> None:
+        """Register a continuous variable with a Uniform(a, b) distribution."""
+        ctx = f"add_uniform({name!r})"
+        lo, hi = _validate_domain(domain, ctx)
+        ib = _validate_initial_bins(initial_bins, ctx)
+        dm = self._ensure_manager()
+        var_id = self._prepare_continuous_variable(name, parents, ib)
+        parent_ids = [self._name_to_id[p] for p in parents]
+        a_fn = _wrap_param(a, parents, self._continuous_names)
+        b_fn = _wrap_param(b, parents, self._continuous_names)
+        dm.register_uniform(var_id=var_id, name=name, parents=parent_ids,
+                             a_fn=a_fn, b_fn=b_fn,
+                             domain_lo=lo, domain_hi=hi,
+                             initial_bins=ib, log_spaced=False)
+
+    def add_exponential(self, name: str, *,
+                         parents: Sequence[str] = (),
+                         rate: Param,
+                         domain: Tuple[float, float],
+                         initial_bins: int = 8,
+                         log_spaced: bool = True) -> None:
+        """Register a continuous variable with an Exponential(rate) distribution."""
+        ctx = f"add_exponential({name!r})"
+        lo, hi = _validate_domain(domain, ctx)
+        if lo < 0.0:
+            raise ValueError(
+                f"{ctx}: Exponential has support [0, ∞); "
+                f"domain_lo must be >= 0 (got {lo})"
+            )
+        ib = _validate_initial_bins(initial_bins, ctx)
+        dm = self._ensure_manager()
+        var_id = self._prepare_continuous_variable(name, parents, ib)
+        parent_ids = [self._name_to_id[p] for p in parents]
+        rate_fn = _wrap_param(rate, parents, self._continuous_names)
+        dm.register_exponential(var_id=var_id, name=name, parents=parent_ids,
+                                 rate_fn=rate_fn,
+                                 domain_lo=lo, domain_hi=hi,
+                                 initial_bins=ib, log_spaced=bool(log_spaced))
+
+    def add_deterministic(self, name: str, *,
+                           parents: Sequence[str],
+                           fn: Callable[..., float],
+                           domain: Tuple[float, float],
+                           initial_bins: int = 8,
+                           monotone: bool = False,
+                           n_samples: int = 32) -> None:
+        """Register a deterministic continuous variable ``Y = fn(parents)``.
+
+        For a deterministic node with no randomness (e.g. ``Y = X1 + X2``),
+        the mass distribution over Y-bins is computed by either:
+          * ``monotone=True``: interval arithmetic — evaluate ``fn`` at the
+            extreme corners of the parent hyper-rectangle and spread mass
+            by overlap length.  **Exact** for monotone ``fn``.
+          * ``monotone=False``: Monte-Carlo over ``n_samples`` random points
+            inside the parent hyper-rectangle, placing each sample into the
+            bin containing ``fn(...)``.
+
+        Parameters
+        ----------
+        name : str
+        parents : sequence of str
+            Must be non-empty (deterministic node requires at least one parent).
+        fn : callable
+            Takes parent values in declared order, returns a float.
+        domain : (float, float)
+            Discretization support.
+        initial_bins : int, default 8
+        monotone : bool, default False
+        n_samples : int, default 32
+        """
+        ctx = f"add_deterministic({name!r})"
+        if not parents:
+            raise ValueError(
+                f"{ctx}: deterministic node requires at least one parent"
+            )
+        if not callable(fn):
+            raise TypeError(f"{ctx}: fn must be callable")
+        lo, hi = _validate_domain(domain, ctx)
+        ib = _validate_initial_bins(initial_bins, ctx)
+        if n_samples < 1:
+            raise ValueError(f"{ctx}: n_samples must be >= 1")
+        dm = self._ensure_manager()
+        var_id = self._prepare_continuous_variable(name, parents, ib)
+        parent_ids = [self._name_to_id[p] for p in parents]
+        wrapped = _wrap_param(fn, parents, self._continuous_names)
+        dm.register_deterministic(
+            var_id=var_id, name=name, parents=parent_ids, fn=wrapped,
+            domain_lo=lo, domain_hi=hi,
+            initial_bins=ib, log_spaced=False,
+            monotone=bool(monotone), n_samples=int(n_samples),
+        )
+
+    def add_threshold(self, name: str, threshold: float) -> None:
+        """Declare a rare-event threshold for a continuous variable.
+
+        Causes the dynamic-discretization refinement to always maintain a
+        bin edge exactly at ``threshold``, giving clean tail-probability
+        integration for queries of the form ``P(X < threshold)``.
+        """
+        if not self._is_hybrid or self._discretization_manager is None:
+            raise RuntimeError(
+                "add_threshold requires a hybrid model; "
+                "call add_normal / add_lognormal / ... first"
+            )
+        if name not in self._name_to_id:
+            raise ValueError(f"unknown variable '{name}'")
+        if name not in self._continuous_names:
+            raise ValueError(
+                f"add_threshold only applies to continuous variables; "
+                f"'{name}' is discrete"
+            )
+        self._discretization_manager.add_threshold(
+            self._name_to_id[name], _as_float(threshold, "threshold")
+        )
+        self._is_compiled = False
+
+    # ------------------------------------------------------------------ evidence
+    def set_continuous_evidence(self, evidence: Dict[str, float]) -> None:
+        """Pin continuous variables to specific observed values.
+
+        Evidence is re-resolved to the current bin grid at every DD
+        iteration, so it remains valid as bins are refined.
+        """
+        if not isinstance(evidence, dict):
+            raise TypeError("set_continuous_evidence expects a dict")
+        for name, val in evidence.items():
+            if name not in self._continuous_names:
+                raise ValueError(
+                    f"set_continuous_evidence: '{name}' is not a registered "
+                    f"continuous variable"
+                )
+            self._continuous_evidence[name] = _as_float(val, f"evidence[{name}]")
+
+    def clear_continuous_evidence(self, name: Optional[str] = None) -> None:
+        """Remove continuous evidence.  If ``name`` is given, only that variable."""
+        if name is None:
+            self._continuous_evidence.clear()
+            self._continuous_likelihoods.clear()
+        else:
+            self._continuous_evidence.pop(name, None)
+            self._continuous_likelihoods.pop(name, None)
+
+    def set_continuous_likelihood(self, name: str,
+                                    likelihood: Callable[[float], float]) -> None:
+        """Apply soft evidence to a continuous variable as a likelihood density ``λ(x)``.
+
+        The likelihood is integrated over each bin (midpoint rule) at every
+        iteration to form a per-bin likelihood vector.
+        """
+        if name not in self._continuous_names:
+            raise ValueError(
+                f"set_continuous_likelihood: '{name}' is not a registered "
+                f"continuous variable"
+            )
+        if not callable(likelihood):
+            raise TypeError("likelihood must be callable: λ(x) -> float")
+        self._continuous_likelihoods[name] = likelihood
+        self._continuous_evidence.pop(name, None)  # mutually exclusive
+
+    # --------------------------------------------------------------------- query
+    class HybridResult:
+        """Return type for :meth:`hybrid_query`.  Subscriptable like a dict,
+        plus attributes for convergence diagnostics."""
+        __slots__ = ("_posteriors", "iterations_used", "final_max_error",
+                      "converged", "max_iters")
+
+        def __init__(self, posteriors, iterations_used, final_max_error,
+                      converged, max_iters):
+            self._posteriors = posteriors
+            self.iterations_used = iterations_used
+            self.final_max_error = final_max_error
+            self.converged = converged
+            self.max_iters = max_iters
+
+        def __getitem__(self, name):
+            return self._posteriors[name]
+
+        def __contains__(self, name):
+            return name in self._posteriors
+
+        def __iter__(self):
+            return iter(self._posteriors)
+
+        def keys(self):
+            return self._posteriors.keys()
+
+        def items(self):
+            return self._posteriors.items()
+
+        def values(self):
+            return self._posteriors.values()
+
+        def __repr__(self):
+            conv = "converged" if self.converged else \
+                    f"NOT converged ({self.iterations_used}/{self.max_iters} iters)"
+            return (
+                f"HybridResult({conv}, max_error={self.final_max_error:.4g}, "
+                f"posteriors={list(self._posteriors.keys())})"
+            )
+
+    def hybrid_query(self, nodes: Sequence[str], *,
+                      max_iters: int = 8,
+                      eps_entropy: float = 1e-4,
+                      eps_kl: float = 1e-4) -> "PyBNCoreWrapper.HybridResult":
+        """Run dynamic-discretization inference and return posteriors.
+
+        Parameters
+        ----------
+        nodes :
+            Variable names to query.  May include both continuous and
+            discrete variables.
+        max_iters, eps_entropy, eps_kl :
+            Convergence configuration.  Stops on either entropy error
+            below ``eps_entropy`` or inter-iteration KL below ``eps_kl``.
+
+        Returns
+        -------
+        HybridResult
+            Subscriptable by name.  Continuous variables return
+            :class:`ContinuousPosterior`; discrete variables return
+            ``Dict[str, float]`` (same shape as :meth:`batch_query_marginals`
+            in scalar mode).
+
+        Raises
+        ------
+        RuntimeError
+            If no continuous variables are registered.
+        """
+        if not self._is_hybrid:
+            raise RuntimeError(
+                "hybrid_query requires at least one continuous variable; "
+                "register one with add_normal / add_lognormal / ... first"
+            )
+        if not nodes:
+            raise ValueError("hybrid_query requires at least one query node")
+        if not self._is_compiled:
+            self._compile()
+
+        # Push continuous evidence (re-resolved each iteration by HybridEngine).
+        self._hybrid_engine.clear_evidence_continuous  # sanity: exists
+        for n in self._continuous_names:
+            self._hybrid_engine.clear_evidence_continuous(self._name_to_id[n])
+        for name, val in self._continuous_evidence.items():
+            self._hybrid_engine.set_evidence_continuous(
+                self._name_to_id[name], float(val)
+            )
+        for name, lik in self._continuous_likelihoods.items():
+            self._hybrid_engine.set_soft_evidence_continuous(
+                self._name_to_id[name], lik
+            )
+
+        # Discrete hard evidence (from the existing `_evidence` dict).
+        num_vars = self._graph.num_variables()
+        ev = np.full(num_vars, -1, dtype=np.int32)
+        for dname, dstate in self._evidence.items():
+            if dname in self._name_to_id and dname in self._node_states:
+                states = self._node_states[dname]
+                if dstate in states:
+                    ev[self._name_to_id[dname]] = states.index(dstate)
+
+        # Validate query nodes + translate to ids.
+        qids = np.asarray(
+            [self._name_to_id[n] for n in nodes], dtype=np.int64
+        )
+
+        cfg = HybridRunConfig()
+        cfg.max_iters = int(max_iters)
+        cfg.eps_entropy = float(eps_entropy)
+        cfg.eps_kl = float(eps_kl)
+
+        result = self._hybrid_engine.run(ev, qids, cfg)
+
+        # Package posteriors: continuous → ContinuousPosterior, discrete → dict.
+        out: Dict[str, Union[ContinuousPosterior, Dict[str, float]]] = {}
+        for qn in nodes:
+            qid = self._name_to_id[qn]
+            post = np.asarray(result.posteriors[qid], dtype=np.float64)
+            if qn in self._continuous_names:
+                edges = np.asarray(result.edges[qid], dtype=np.float64)
+                out[qn] = ContinuousPosterior(qn, edges, post)
+            else:
+                states = self._node_states[qn]
+                out[qn] = {s: float(post[i]) for i, s in enumerate(states)}
+
+        converged = result.final_max_error < cfg.eps_entropy
+        return self.HybridResult(
+            posteriors=out,
+            iterations_used=int(result.iterations_used),
+            final_max_error=float(result.final_max_error),
+            converged=bool(converged),
+            max_iters=int(max_iters),
+        )

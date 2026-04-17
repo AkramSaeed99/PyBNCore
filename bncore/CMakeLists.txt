@@ -24,6 +24,8 @@ add_library(bncore_core STATIC
     src/workspace.cpp
     src/engine.cpp
     src/manager.cpp
+    src/cpd_integrator.cpp
+    src/hybrid_engine.cpp
 )
 target_include_directories(bncore_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

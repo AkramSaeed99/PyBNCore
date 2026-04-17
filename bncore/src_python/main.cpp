@@ -1,15 +1,21 @@
+#include "bncore/discretization/cpd_integrator.hpp"
 #include "bncore/discretization/manager.hpp"
 #include "bncore/graph/graph.hpp"
 #include "bncore/inference/compiler.hpp"
 #include "bncore/inference/engine.hpp"
+#include "bncore/inference/hybrid_engine.hpp"
 #include "bncore/inference/junction_tree.hpp"
 #include "bncore/inference/workspace.hpp"
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/function.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unique_ptr.h>
+#include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <stdexcept>
 
 namespace nb = nanobind;
@@ -21,6 +27,7 @@ NB_MODULE(_core, m) {
       .def_ro("id", &bncore::VariableMetadata::id)
       .def_ro("name", &bncore::VariableMetadata::name)
       .def_ro("states", &bncore::VariableMetadata::states)
+      .def_ro("cpt", &bncore::VariableMetadata::cpt)
       .def("num_states", &bncore::VariableMetadata::num_states);
 
   nb::class_<bncore::Graph>(m, "Graph")
@@ -82,6 +89,11 @@ NB_MODULE(_core, m) {
            nb::arg("chunk_size") = 1024)
       .def("invalidate_workspace_cache",
            &bncore::BatchExecutionEngine::invalidate_workspace_cache)
+      .def("set_dsep_enabled",
+           &bncore::BatchExecutionEngine::set_dsep_enabled,
+           nb::arg("enabled"))
+      .def("dsep_enabled",
+           &bncore::BatchExecutionEngine::dsep_enabled)
       .def(
           "evaluate",
           [](bncore::BatchExecutionEngine &engine,
@@ -234,9 +246,193 @@ NB_MODULE(_core, m) {
            &bncore::BatchExecutionEngine::clear_soft_evidence);
 
   nb::class_<bncore::DiscretizationManager>(m, "DiscretizationManager")
-      .def(nb::init<std::size_t>(), nb::arg("max_bins_per_var") = 50)
+      .def(nb::init<std::size_t>(), nb::arg("max_bins_per_var") = 40)
       .def("should_split", &bncore::DiscretizationManager::should_split,
            nb::arg("graph"), nb::arg("var"))
       .def("split_bin", &bncore::DiscretizationManager::split_bin,
-           nb::arg("graph"), nb::arg("var"), nb::arg("state_idx"));
+           nb::arg("graph"), nb::arg("var"), nb::arg("state_idx"))
+      .def("initialize_graph",
+           &bncore::DiscretizationManager::initialize_graph, nb::arg("graph"))
+      .def("rebuild_cpts", &bncore::DiscretizationManager::rebuild_cpts,
+           nb::arg("graph"))
+      .def("refine", &bncore::DiscretizationManager::refine, nb::arg("graph"))
+      .def("last_max_error",
+           &bncore::DiscretizationManager::last_max_error)
+      .def("converged", &bncore::DiscretizationManager::converged,
+           nb::arg("eps_entropy"), nb::arg("eps_kl"))
+      .def("add_threshold", &bncore::DiscretizationManager::add_threshold,
+           nb::arg("var_id"), nb::arg("threshold"))
+      .def(
+          "register_normal",
+          [](bncore::DiscretizationManager &dm, bncore::NodeId var_id,
+             const std::string &name, const std::vector<bncore::NodeId> &parents,
+             std::function<double(const bncore::ParentBins &)> mu_fn,
+             std::function<double(const bncore::ParentBins &)> sigma_fn,
+             double domain_lo, double domain_hi, std::size_t initial_bins,
+             bool log_spaced, bool rare_event_mode) {
+            dm.register_variable(
+                var_id, name, parents,
+                std::make_unique<bncore::NormalCpd>(std::move(mu_fn),
+                                                    std::move(sigma_fn)),
+                domain_lo, domain_hi, initial_bins, log_spaced,
+                rare_event_mode);
+          },
+          nb::arg("var_id"), nb::arg("name"), nb::arg("parents"),
+          nb::arg("mu_fn"), nb::arg("sigma_fn"), nb::arg("domain_lo"),
+          nb::arg("domain_hi"), nb::arg("initial_bins") = 8,
+          nb::arg("log_spaced") = false, nb::arg("rare_event_mode") = false)
+      .def(
+          "register_uniform",
+          [](bncore::DiscretizationManager &dm, bncore::NodeId var_id,
+             const std::string &name, const std::vector<bncore::NodeId> &parents,
+             std::function<double(const bncore::ParentBins &)> a_fn,
+             std::function<double(const bncore::ParentBins &)> b_fn,
+             double domain_lo, double domain_hi, std::size_t initial_bins,
+             bool log_spaced, bool rare_event_mode) {
+            dm.register_variable(
+                var_id, name, parents,
+                std::make_unique<bncore::UniformCpd>(std::move(a_fn),
+                                                     std::move(b_fn)),
+                domain_lo, domain_hi, initial_bins, log_spaced,
+                rare_event_mode);
+          },
+          nb::arg("var_id"), nb::arg("name"), nb::arg("parents"),
+          nb::arg("a_fn"), nb::arg("b_fn"), nb::arg("domain_lo"),
+          nb::arg("domain_hi"), nb::arg("initial_bins") = 8,
+          nb::arg("log_spaced") = false, nb::arg("rare_event_mode") = false)
+      .def(
+          "register_exponential",
+          [](bncore::DiscretizationManager &dm, bncore::NodeId var_id,
+             const std::string &name, const std::vector<bncore::NodeId> &parents,
+             std::function<double(const bncore::ParentBins &)> rate_fn,
+             double domain_lo, double domain_hi, std::size_t initial_bins,
+             bool log_spaced, bool rare_event_mode) {
+            dm.register_variable(
+                var_id, name, parents,
+                std::make_unique<bncore::ExponentialCpd>(std::move(rate_fn)),
+                domain_lo, domain_hi, initial_bins, log_spaced,
+                rare_event_mode);
+          },
+          nb::arg("var_id"), nb::arg("name"), nb::arg("parents"),
+          nb::arg("rate_fn"), nb::arg("domain_lo"), nb::arg("domain_hi"),
+          nb::arg("initial_bins") = 8, nb::arg("log_spaced") = true,
+          nb::arg("rare_event_mode") = false)
+      .def(
+          "register_lognormal",
+          [](bncore::DiscretizationManager &dm, bncore::NodeId var_id,
+             const std::string &name, const std::vector<bncore::NodeId> &parents,
+             std::function<double(const bncore::ParentBins &)> log_mu_fn,
+             std::function<double(const bncore::ParentBins &)> log_sigma_fn,
+             double domain_lo, double domain_hi, std::size_t initial_bins,
+             bool log_spaced, bool rare_event_mode) {
+            dm.register_variable(
+                var_id, name, parents,
+                std::make_unique<bncore::LogNormalCpd>(
+                    std::move(log_mu_fn), std::move(log_sigma_fn)),
+                domain_lo, domain_hi, initial_bins, log_spaced,
+                rare_event_mode);
+          },
+          nb::arg("var_id"), nb::arg("name"), nb::arg("parents"),
+          nb::arg("log_mu_fn"), nb::arg("log_sigma_fn"), nb::arg("domain_lo"),
+          nb::arg("domain_hi"), nb::arg("initial_bins") = 8,
+          nb::arg("log_spaced") = true, nb::arg("rare_event_mode") = false)
+      .def(
+          "register_deterministic",
+          [](bncore::DiscretizationManager &dm, bncore::NodeId var_id,
+             const std::string &name,
+             const std::vector<bncore::NodeId> &parents,
+             std::function<double(const bncore::ParentBins &)> fn,
+             double domain_lo, double domain_hi, std::size_t initial_bins,
+             bool log_spaced, bool monotone, std::size_t n_samples) {
+            dm.register_variable(
+                var_id, name, parents,
+                std::make_unique<bncore::DeterministicCpd>(
+                    std::move(fn), monotone, n_samples),
+                domain_lo, domain_hi, initial_bins, log_spaced, false);
+          },
+          nb::arg("var_id"), nb::arg("name"), nb::arg("parents"),
+          nb::arg("fn"), nb::arg("domain_lo"), nb::arg("domain_hi"),
+          nb::arg("initial_bins") = 8, nb::arg("log_spaced") = false,
+          nb::arg("monotone") = false, nb::arg("n_samples") = 32)
+      .def(
+          "register_user_function",
+          [](bncore::DiscretizationManager &dm, bncore::NodeId var_id,
+             const std::string &name, const std::vector<bncore::NodeId> &parents,
+             std::function<double(double, double, const bncore::ParentBins &)> fn,
+             double domain_lo, double domain_hi, std::size_t initial_bins,
+             bool log_spaced) {
+            dm.register_variable(
+                var_id, name, parents,
+                std::make_unique<bncore::UserFunctionCpd>(std::move(fn)),
+                domain_lo, domain_hi, initial_bins, log_spaced);
+          },
+          nb::arg("var_id"), nb::arg("name"), nb::arg("parents"),
+          nb::arg("fn"), nb::arg("domain_lo"), nb::arg("domain_hi"),
+          nb::arg("initial_bins") = 8, nb::arg("log_spaced") = false)
+      .def(
+          "variable_edges",
+          [](const bncore::DiscretizationManager &dm, bncore::NodeId var_id) {
+            for (const auto &v : dm.variables())
+              if (v.id == var_id) return v.edges;
+            throw std::invalid_argument("variable not registered in manager");
+          },
+          nb::arg("var_id"))
+      .def(
+          "variable_posterior",
+          [](const bncore::DiscretizationManager &dm, bncore::NodeId var_id) {
+            for (const auto &v : dm.variables())
+              if (v.id == var_id) return v.posterior;
+            throw std::invalid_argument("variable not registered in manager");
+          },
+          nb::arg("var_id"));
+
+  nb::class_<bncore::ParentBins>(m, "ParentBins")
+      .def_ro("continuous_values", &bncore::ParentBins::continuous_values)
+      .def_ro("discrete_states", &bncore::ParentBins::discrete_states);
+
+  nb::class_<bncore::HybridEngine::RunConfig>(m, "HybridRunConfig")
+      .def(nb::init<>())
+      .def_rw("max_iters", &bncore::HybridEngine::RunConfig::max_iters)
+      .def_rw("eps_entropy", &bncore::HybridEngine::RunConfig::eps_entropy)
+      .def_rw("eps_kl", &bncore::HybridEngine::RunConfig::eps_kl);
+
+  nb::class_<bncore::HybridEngine::RunResult>(m, "HybridRunResult")
+      .def_ro("iterations_used",
+              &bncore::HybridEngine::RunResult::iterations_used)
+      .def_ro("final_max_error",
+              &bncore::HybridEngine::RunResult::final_max_error)
+      .def_ro("posteriors", &bncore::HybridEngine::RunResult::posteriors)
+      .def_ro("edges", &bncore::HybridEngine::RunResult::edges);
+
+  nb::class_<bncore::HybridEngine>(m, "HybridEngine")
+      .def(nb::init<bncore::Graph &, bncore::DiscretizationManager &,
+                    std::size_t>(),
+           nb::arg("graph"), nb::arg("manager"), nb::arg("num_threads") = 1)
+      .def(
+          "run",
+          [](bncore::HybridEngine &eng,
+             nb::ndarray<int, nb::c_contig, nb::device::cpu> evidence,
+             nb::ndarray<std::int64_t, nb::c_contig, nb::device::cpu> queries,
+             const bncore::HybridEngine::RunConfig &cfg) {
+            if (evidence.ndim() != 1)
+              throw std::invalid_argument("evidence must be 1D int array");
+            if (queries.ndim() != 1)
+              throw std::invalid_argument("queries must be 1D int64 array");
+            std::vector<bncore::NodeId> qv(queries.shape(0));
+            for (std::size_t i = 0; i < qv.size(); ++i) {
+              qv[i] = static_cast<bncore::NodeId>(queries.data()[i]);
+            }
+            return eng.run(evidence.data(), evidence.shape(0), qv.data(),
+                           qv.size(), cfg);
+          },
+          nb::arg("evidence"), nb::arg("queries"), nb::arg("config"))
+      .def("set_evidence_continuous",
+           &bncore::HybridEngine::set_evidence_continuous,
+           nb::arg("var"), nb::arg("value"))
+      .def("set_soft_evidence_continuous",
+           &bncore::HybridEngine::set_soft_evidence_continuous,
+           nb::arg("var"), nb::arg("likelihood"))
+      .def("clear_evidence_continuous",
+           &bncore::HybridEngine::clear_evidence_continuous,
+           nb::arg("var"));
 }

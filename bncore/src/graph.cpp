@@ -20,6 +20,32 @@ NodeId Graph::add_variable(const std::string &name,
   return id;
 }
 
+// Helper: duplicate the slice at (axis = split_axis, index = slot) in a flat
+// tensor whose logical shape is outer × axis_size × inner.  Returns a new
+// flat vector whose shape is outer × (axis_size+1) × inner, with the slot's
+// values present at BOTH slot and slot+1.  Caller may rescale afterward.
+static std::vector<double> insert_duplicate_slice(
+    const std::vector<double> &data,
+    std::size_t outer, std::size_t axis_size, std::size_t inner,
+    std::size_t slot) {
+  const std::size_t new_axis = axis_size + 1;
+  std::vector<double> out(outer * new_axis * inner, 0.0);
+  for (std::size_t o = 0; o < outer; ++o) {
+    for (std::size_t a = 0; a < axis_size; ++a) {
+      const std::size_t a_new = (a <= slot) ? a : a + 1;
+      for (std::size_t i = 0; i < inner; ++i) {
+        const double v = data[(o * axis_size + a) * inner + i];
+        out[(o * new_axis + a_new) * inner + i] = v;
+        if (a == slot) {
+          // duplicate into slot+1
+          out[(o * new_axis + slot + 1) * inner + i] = v;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 void Graph::split_state(NodeId id, std::size_t state_idx,
                         const std::string &new_state1,
                         const std::string &new_state2) {
@@ -29,6 +55,82 @@ void Graph::split_state(NodeId id, std::size_t state_idx,
   if (state_idx >= var.states.size())
     throw std::out_of_range("Invalid state index.");
 
+  const std::size_t old_k = var.states.size();
+
+  // ── Step 1: fix X's OWN CPT (if present) ────────────────────────────────
+  // CPT layout: flat [pa_configs, k_X, (B)] with child axis last (before batch).
+  // When X has no CPT yet (e.g. before set_cpt was called), skip.
+  if (!var.cpt.empty()) {
+    std::size_t pa_configs = 1;
+    for (NodeId p : parents_[id]) pa_configs *= variables_[p].states.size();
+    const std::size_t family_states = pa_configs * old_k;
+    if (var.cpt.size() % family_states != 0) {
+      throw std::invalid_argument(
+          "split_state: CPT size of variable '" + var.name +
+          "' is inconsistent with its state count.");
+    }
+    const std::size_t batch = var.cpt.size() / family_states;
+
+    // outer = pa_configs, axis = old_k, inner = batch
+    auto grown = insert_duplicate_slice(var.cpt, pa_configs, old_k, batch,
+                                        state_idx);
+    // Mass conservation: the two new states must replace one old state so
+    // that each parent-conditioned row still sums to 1.  Halve both copies.
+    const std::size_t new_k = old_k + 1;
+    for (std::size_t o = 0; o < pa_configs; ++o) {
+      for (std::size_t b = 0; b < batch; ++b) {
+        std::size_t il = (o * new_k + state_idx) * batch + b;
+        std::size_t ir = (o * new_k + state_idx + 1) * batch + b;
+        grown[il] *= 0.5;
+        grown[ir] *= 0.5;
+      }
+    }
+    var.cpt = std::move(grown);
+  }
+
+  // ── Step 2: fix every CHILD's CPT where X is a parent ───────────────────
+  // Child Y's CPT shape: [pa_of_Y..., k_Y, (B)].  X is at position pos_X
+  // among Y's parents (the order in parents_[Y]).  We compute:
+  //   outer = product of cardinalities of parents BEFORE X in Y's parent list
+  //   axis  = old_k (X's old cardinality)
+  //   inner = (product of cardinalities of parents AFTER X) * k_Y * batch
+  // then duplicate X's slot.  Values are not halved — children's conditional
+  // distributions at the split state remain valid for BOTH new states.
+  for (NodeId child_id : children_[id]) {
+    auto &child = variables_[child_id];
+    if (child.cpt.empty()) continue;
+    const std::size_t k_Y = child.states.size();
+
+    // Find X's position in Y's parents.
+    const auto &pa = parents_[child_id];
+    std::size_t pos_X = 0;
+    bool found = false;
+    for (std::size_t i = 0; i < pa.size(); ++i) {
+      if (pa[i] == id) { pos_X = i; found = true; break; }
+    }
+    if (!found) continue;  // should not happen
+
+    std::size_t outer = 1;
+    for (std::size_t i = 0; i < pos_X; ++i)
+      outer *= variables_[pa[i]].states.size();
+    std::size_t tail = 1;
+    for (std::size_t i = pos_X + 1; i < pa.size(); ++i)
+      tail *= variables_[pa[i]].states.size();
+    const std::size_t total_pa_configs = outer * old_k * tail;
+    const std::size_t family_states = total_pa_configs * k_Y;
+    if (child.cpt.size() % family_states != 0) {
+      throw std::invalid_argument(
+          "split_state: CPT size of child '" + child.name +
+          "' is inconsistent with its family state count.");
+    }
+    const std::size_t batch = child.cpt.size() / family_states;
+    const std::size_t inner = tail * k_Y * batch;
+
+    child.cpt = insert_duplicate_slice(child.cpt, outer, old_k, inner,
+                                        state_idx);
+  }
+
+  // ── Step 3: update X's state list ───────────────────────────────────────
   var.states.erase(var.states.begin() + state_idx);
   var.states.insert(var.states.begin() + state_idx, new_state2);
   var.states.insert(var.states.begin() + state_idx, new_state1);
