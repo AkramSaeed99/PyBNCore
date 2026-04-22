@@ -168,9 +168,7 @@ class InferenceService:
                     k for row in evidence_rows for k in row.keys()
                 })
                 self._validate_evidence_columns(wrapper, evidence_columns)
-                matrix = wrapper.make_evidence_matrix(
-                    [dict(r) for r in evidence_rows], evidence_columns
-                )
+                matrix = self._build_evidence_matrix(wrapper, evidence_rows)
                 self._ensure_jt(wrapper)
                 marginals_raw = wrapper.batch_query_marginals(list(query_nodes), matrix)
             except Exception as e:  # noqa: BLE001
@@ -331,34 +329,67 @@ class InferenceService:
         pdf_samples: int,
         quantiles: Sequence[float],
     ) -> ContinuousPosteriorDTO:
-        support = tuple(float(x) for x in posterior.support)  # type: ignore[attr-defined]
+        def _scalar(value) -> float:
+            return float(value() if callable(value) else value)
+
+        def _seq(value) -> tuple[float, ...]:
+            raw = value() if callable(value) else value
+            return tuple(float(x) for x in raw)
+
+        support_raw = posterior.support
+        support = tuple(
+            float(x) for x in (support_raw() if callable(support_raw) else support_raw)
+        )
         lo, hi = support
-        edges = tuple(float(x) for x in posterior.edges)  # type: ignore[attr-defined]
-        masses = tuple(float(x) for x in posterior.bin_masses)  # type: ignore[attr-defined]
+        edges = _seq(getattr(posterior, "edges"))
+        masses = _seq(getattr(posterior, "bin_masses"))
 
         grid = np.linspace(lo, hi, max(32, int(pdf_samples)))
         pdf_grid = tuple((float(x), float(posterior.pdf(float(x)))) for x in grid)
         cdf_grid = tuple((float(x), float(posterior.cdf(float(x)))) for x in grid)
         try:
-            median = float(posterior.median)
+            median = _scalar(posterior.median)
         except Exception:  # noqa: BLE001
             median = float(posterior.quantile(0.5))
         quantile_pairs = tuple(
             (float(q), float(posterior.quantile(float(q)))) for q in quantiles
         )
+        num_bins_raw = posterior.num_bins
         return ContinuousPosteriorDTO(
             name=str(getattr(posterior, "name", "")),
-            num_bins=int(posterior.num_bins),
+            num_bins=int(num_bins_raw() if callable(num_bins_raw) else num_bins_raw),
             support=support,
             bin_edges=edges,
             bin_masses=masses,
-            mean=float(posterior.mean),
-            std=float(posterior.std),
+            mean=_scalar(posterior.mean),
+            std=_scalar(posterior.std),
             median=median,
             pdf_grid=pdf_grid,
             cdf_grid=cdf_grid,
             quantiles=quantile_pairs,
         )
+
+    @staticmethod
+    def _build_evidence_matrix(wrapper, rows: Sequence[Mapping[str, str]]) -> np.ndarray:
+        num_vars = wrapper._graph.num_variables()
+        name_to_id = wrapper._name_to_id
+        node_states = wrapper._node_states
+        matrix = np.full((len(rows), num_vars), -1, dtype=np.int32)
+        for r, row in enumerate(rows):
+            for name, value in row.items():
+                vid = name_to_id.get(name)
+                if vid is None:
+                    continue
+                if isinstance(value, int):
+                    idx = int(value)
+                else:
+                    states = node_states.get(name, [])
+                    try:
+                        idx = states.index(str(value))
+                    except ValueError:
+                        continue
+                matrix[r, vid] = idx
+        return matrix
 
     @staticmethod
     def _validate_evidence_columns(wrapper, columns: Sequence[str]) -> None:

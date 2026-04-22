@@ -25,6 +25,36 @@ logger = logging.getLogger(__name__)
 _ProgressCb = Callable[[int, str], None]
 
 
+def _build_evidence_matrix(
+    wrapper, rows: Sequence[Mapping[str, str]]
+) -> np.ndarray:
+    """Build a per-row evidence matrix shaped (n_rows, num_vars).
+
+    The wrapper's `make_evidence_matrix` only broadcasts one evidence dict
+    across a batch; we need row-wise evidence, so we construct it directly
+    from `_name_to_id` and `_node_states`.
+    """
+    num_vars = wrapper._graph.num_variables()
+    name_to_id = wrapper._name_to_id
+    node_states = wrapper._node_states
+    matrix = np.full((len(rows), num_vars), -1, dtype=np.int32)
+    for r, row in enumerate(rows):
+        for name, value in row.items():
+            vid = name_to_id.get(name)
+            if vid is None:
+                continue
+            if isinstance(value, int):
+                idx = int(value)
+            else:
+                states = node_states.get(name, [])
+                try:
+                    idx = states.index(str(value))
+                except ValueError:
+                    continue
+            matrix[r, vid] = idx
+    return matrix
+
+
 class AnalysisService:
     def __init__(self, session: ModelSession) -> None:
         self._session = session
@@ -149,7 +179,7 @@ class AnalysisService:
                 for idx, n_rows in enumerate(row_counts):
                     rows = self._random_rows(wrapper, observed_nodes, n_rows, rng)
                     matrix = (
-                        wrapper.make_evidence_matrix(rows, list(observed_nodes))
+                        _build_evidence_matrix(wrapper, rows)
                         if observed_nodes
                         else None
                     )
@@ -217,7 +247,7 @@ class AnalysisService:
                     progress(20, f"Sampling {num_samples} evidence rows…")
 
                 matrix = (
-                    wrapper.make_evidence_matrix(rows, list(observed_nodes))
+                    _build_evidence_matrix(wrapper, rows)
                     if observed_nodes
                     else None
                 )
