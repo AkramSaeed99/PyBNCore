@@ -16,6 +16,21 @@ dependencies = [
     "numpy>=1.24,<2.0",
 ]
 
+[project.optional-dependencies]
+gui = [
+    "PySide6>=6.6",
+]
+dev = [
+    "pytest>=7",
+    "pytest-qt>=4.4",
+]
+
+[project.scripts]
+pybncore-gui = "pybncore_gui.app:main"
+
 [tool.scikit-build]
-wheel.packages = ["pybncore"]
+wheel.packages = ["pybncore", "pybncore_gui"]
 cmake.build-type = "Release"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
