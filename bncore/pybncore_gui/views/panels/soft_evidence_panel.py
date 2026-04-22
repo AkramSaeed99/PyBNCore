@@ -87,7 +87,14 @@ class SoftEvidencePanel(QWidget):
         if not self._current_node:
             self._reset()
             return
-        states = self._viewmodel.model_service.get_outcomes(self._current_node)
+        # The node may have been renamed / removed between the selection
+        # event and this refresh — guard before touching the wrapper.
+        try:
+            states = self._viewmodel.model_service.get_outcomes(self._current_node)
+        except Exception:
+            self._current_node = None
+            self._reset()
+            return
         existing = self._viewmodel.soft_evidence.get(self._current_node, {})
         self._node_label.setText(f"Likelihoods for <b>{self._current_node}</b>")
         self._table.setRowCount(0)
