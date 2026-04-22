@@ -16,6 +16,7 @@ from pybncore_gui.commands import (
     AddEquationNodeCommand,
     AddNodeCommand,
     AddNoisyMaxCommand,
+    EditStatesCommand,
     MoveNodesCommand,
     RemoveEdgeCommand,
     RemoveNodeCommand,
@@ -56,6 +57,7 @@ from pybncore_gui.workers.batch_worker import BatchQueryWorker
 from pybncore_gui.workers.benchmark_worker import BenchmarkWorker
 from pybncore_gui.workers.compile_worker import CompileWorker
 from pybncore_gui.workers.hybrid_worker import HybridQueryWorker
+from pybncore_gui.workers.load_model_worker import LoadModelResult, LoadModelWorker
 from pybncore_gui.workers.map_worker import MAPQueryWorker
 from pybncore_gui.workers.monte_carlo_worker import MonteCarloWorker
 from pybncore_gui.workers.query_worker import QueryWorker
@@ -230,25 +232,39 @@ class MainViewModel(QObject):
 
     @Slot(str)
     def open_xdsl(self, path: str) -> None:
-        try:
-            self._io.open_xdsl(path)
-        except DomainError as e:
-            self.log_message.emit("error", e.user_message)
-            return
-        self._positions.clear()
-        # Parse sub-model tree + node positions from the XDSL genie extensions.
-        self._load_layout_from_xdsl(path)
-        self._on_model_changed(source=f"Loaded {path}")
+        self._start_load(path, kind="xdsl")
 
     @Slot(str)
     def import_bif(self, path: str) -> None:
-        try:
-            self._io.import_bif(path)
-        except DomainError as e:
-            self.log_message.emit("error", e.user_message)
+        self._start_load(path, kind="bif")
+
+    def _start_load(self, path: str, *, kind: str) -> None:
+        if self.is_busy:
+            self.log_message.emit(
+                "warning", "Another operation is running — try again in a moment."
+            )
             return
+        worker = LoadModelWorker(self._io, path, kind=kind)
+        self.log_message.emit("info", f"Loading {path}…")
+        self._run_worker(
+            worker,
+            self._on_model_load_finished,
+            self._on_model_load_failed,
+        )
+
+    @Slot(object)
+    def _on_model_load_finished(self, result: LoadModelResult) -> None:
         self._positions.clear()
-        self._on_model_changed(source=f"Imported BIF {path}")
+        if result.kind == "xdsl":
+            self._load_layout_from_xdsl(result.path)
+            source = f"Loaded {result.path}"
+        else:
+            source = f"Imported BIF {result.path}"
+        self._on_model_changed(source=source)
+
+    @Slot(str, str)
+    def _on_model_load_failed(self, message: str, _tb: str) -> None:
+        self.log_message.emit("error", message)
 
     @Slot(str)
     def save_xdsl(self, path: str) -> None:
@@ -381,6 +397,14 @@ class MainViewModel(QObject):
         if old == new:
             return
         self._push(RenameNodeCommand(self._authoring, self._emit_structure, old, new))
+
+    @Slot(str, list)
+    def edit_node_states(self, name: str, new_states: Sequence[str]) -> None:
+        self._push(
+            EditStatesCommand(
+                self._authoring, self._emit_structure, name, tuple(new_states)
+            )
+        )
 
     @Slot(str, str)
     def add_edge(self, parent: str, child: str) -> None:
