@@ -34,6 +34,10 @@ class GraphScene(QGraphicsScene):
     remove_edge_requested = Signal(str, str)
     add_node_requested_at = Signal(float, float)
     enter_submodel_requested = Signal(str)
+    add_submodel_requested = Signal(str)           # parent submodel id
+    rename_submodel_requested = Signal(str)        # submodel id
+    delete_submodel_requested = Signal(str)        # submodel id
+    reparent_node_requested = Signal(str, str)     # node id, target submodel id
 
     def __init__(self) -> None:
         super().__init__()
@@ -287,6 +291,38 @@ class GraphScene(QGraphicsScene):
         after = self.current_positions()
         diffs_before = {k: before[k] for k in after if k in before and before[k] != after[k]}
         diffs_after = {k: after[k] for k in diffs_before}
+
+        # Drag-node-onto-container to reparent: if any moved node's centre
+        # lands inside a visible sub-model box, request a reparent instead
+        # of committing the move.
+        reparent: tuple[str, str] | None = None
+        for nid, (x, y) in diffs_after.items():
+            node_item = self._nodes.get(nid)
+            if node_item is None:
+                continue
+            br = node_item.boundingRect()
+            centre = node_item.pos() + QPointF(
+                br.width() / 2, br.height() / 2
+            )
+            for sid, sm_item in self._submodels.items():
+                rect = sm_item.mapRectToScene(sm_item.boundingRect())
+                if rect.contains(centre):
+                    reparent = (nid, sid)
+                    break
+            if reparent is not None:
+                break
+
+        if reparent is not None:
+            nid, target_sid = reparent
+            # Snap the node back to its pre-drag position; the view will
+            # re-render after reparenting and hide it from the current scope.
+            if nid in before:
+                node_item = self._nodes.get(nid)
+                if node_item is not None:
+                    node_item.setPos(QPointF(*before[nid]))
+            self.reparent_node_requested.emit(nid, target_sid)
+            return
+
         if diffs_before:
             self.nodes_moved.emit(diffs_before, diffs_after)
 
@@ -308,10 +344,29 @@ class GraphScene(QGraphicsScene):
     def contextMenuEvent(self, event):  # type: ignore[override]
         sub = self._submodel_item_at(event.scenePos())
         if isinstance(sub, SubModelItem):
+            sid = sub.submodel_id
             menu = QMenu()
-            enter = QAction(f"Enter '{sub.submodel_id}'", menu)
-            enter.triggered.connect(lambda _=False, s=sub.submodel_id: self.enter_submodel_requested.emit(s))
+            enter = QAction(f"Enter '{sid}'", menu)
+            enter.triggered.connect(
+                lambda _=False, s=sid: self.enter_submodel_requested.emit(s)
+            )
             menu.addAction(enter)
+            menu.addSeparator()
+            add_sub = QAction("Add Sub-Model inside…", menu)
+            add_sub.triggered.connect(
+                lambda _=False, s=sid: self.add_submodel_requested.emit(s)
+            )
+            rename_sub = QAction("Rename sub-model…", menu)
+            rename_sub.triggered.connect(
+                lambda _=False, s=sid: self.rename_submodel_requested.emit(s)
+            )
+            delete_sub = QAction("Delete sub-model", menu)
+            delete_sub.triggered.connect(
+                lambda _=False, s=sid: self.delete_submodel_requested.emit(s)
+            )
+            menu.addAction(add_sub)
+            menu.addAction(rename_sub)
+            menu.addAction(delete_sub)
             menu.exec(event.screenPos())
             return
 
@@ -329,13 +384,32 @@ class GraphScene(QGraphicsScene):
             menu.addSeparator()
             menu.addAction(rename)
             menu.addAction(delete)
+            menu.addSeparator()
+            # Move-to-submodel submenu
+            move_menu = menu.addMenu("Move to sub-model")
+            root_action = QAction("Root", move_menu)
+            root_action.triggered.connect(
+                lambda _=False, n=node_id: self.reparent_node_requested.emit(n, "")
+            )
+            move_menu.addAction(root_action)
+            for sid, sm in sorted(self._layout.submodels.items(), key=lambda kv: kv[1].name):
+                act = QAction(sm.name, move_menu)
+                act.triggered.connect(
+                    lambda _=False, n=node_id, target=sid: self.reparent_node_requested.emit(n, target)
+                )
+                move_menu.addAction(act)
         else:
-            add = QAction("Add Discrete Node here…", menu)
+            add_n = QAction("Add Discrete Node here…", menu)
             pos = event.scenePos()
-            add.triggered.connect(
+            add_n.triggered.connect(
                 lambda _=False, x=pos.x(), y=pos.y(): self.add_node_requested_at.emit(x, y)
             )
-            menu.addAction(add)
+            menu.addAction(add_n)
+            add_sm = QAction("Add Sub-Model here…", menu)
+            add_sm.triggered.connect(
+                lambda _=False: self.add_submodel_requested.emit(self._current_submodel)
+            )
+            menu.addAction(add_sm)
 
         menu.exec(event.screenPos())
 

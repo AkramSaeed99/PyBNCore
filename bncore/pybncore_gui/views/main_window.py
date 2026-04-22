@@ -25,6 +25,7 @@ from pybncore_gui.viewmodels.main_viewmodel import MainViewModel
 from pybncore_gui.views.dialogs import (
     AddNodeDialog,
     ContinuousNodeDialog,
+    EditStatesDialog,
     EngineSettingsDialog,
     EquationNodeDialog,
     NoisyMaxWizard,
@@ -426,6 +427,10 @@ class MainWindow(QMainWindow):
         self._scene.nodes_moved.connect(self._on_scene_nodes_moved)
         self._scene.enter_submodel_requested.connect(vm.enter_submodel)
         self._scene.submodel_moved.connect(vm.update_submodel_position)
+        self._scene.add_submodel_requested.connect(self._on_scene_add_submodel)
+        self._scene.rename_submodel_requested.connect(self._on_scene_rename_submodel)
+        self._scene.delete_submodel_requested.connect(self._on_scene_delete_submodel)
+        self._scene.reparent_node_requested.connect(self._on_scene_reparent_node)
 
         vm.layout_changed.connect(self._on_layout_changed)
         vm.current_submodel_changed.connect(self._on_current_submodel_changed)
@@ -434,6 +439,7 @@ class MainWindow(QMainWindow):
         self._palette.add_discrete_node_requested.connect(lambda: self._open_add_node_dialog())
         self._inspector.rename_requested.connect(self._on_scene_rename)
         self._inspector.delete_requested.connect(self._on_scene_delete)
+        self._inspector.edit_states_requested.connect(self._on_edit_states_requested)
 
     # ---------------------------------------------------------- dialogs / IO
 
@@ -690,10 +696,65 @@ class MainWindow(QMainWindow):
         self._viewmodel.enter_submodel(submodel_id)
 
     def _on_new_submodel(self) -> None:
+        self._on_scene_add_submodel(self._viewmodel.current_submodel)
+
+    def _on_scene_add_submodel(self, parent_id: str) -> None:
         name, ok = QInputDialog.getText(self, "New sub-model", "Sub-model name:")
         if not ok or not name.strip():
             return
-        self._viewmodel.create_submodel(name.strip(), self._viewmodel.current_submodel)
+        self._viewmodel.create_submodel(name.strip(), parent_id)
+
+    def _on_scene_rename_submodel(self, submodel_id: str) -> None:
+        sm = self._viewmodel.layout.submodels.get(submodel_id)
+        if sm is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "Rename sub-model", "New name:", text=sm.name
+        )
+        if not ok or not new_name.strip() or new_name == sm.name:
+            return
+        self._viewmodel.rename_submodel(submodel_id, new_name.strip())
+
+    def _on_scene_delete_submodel(self, submodel_id: str) -> None:
+        sm = self._viewmodel.layout.submodels.get(submodel_id)
+        if sm is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete sub-model",
+            f"Delete sub-model '{sm.name}'? "
+            "Its contents are re-homed to the parent.",
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._viewmodel.delete_submodel(submodel_id)
+
+    def _on_scene_reparent_node(self, node_id: str, target_submodel: str) -> None:
+        if not node_id:
+            return
+        self._viewmodel.move_nodes_to_submodel([node_id], target_submodel)
+
+    def _on_edit_states_requested(self, node_id: str) -> None:
+        if not node_id:
+            return
+        nodes = self._viewmodel.model_service.list_nodes()
+        match = next((n for n in nodes if n.id == node_id), None)
+        if match is None:
+            return
+        # Compute affected children so the dialog can warn the user.
+        try:
+            children = tuple(
+                self._viewmodel.authoring_service.node_snapshot(node_id).children
+            )
+        except Exception:
+            children = ()
+        dlg = EditStatesDialog(node_id, list(match.states), children, parent=self)
+        if not dlg.exec():
+            return
+        states = dlg.result_states()
+        if states is None or states == match.states:
+            return
+        self._viewmodel.edit_node_states(node_id, list(states))
 
     def _on_move_selected_to_submodel(self) -> None:
         nid = self._viewmodel.selected_node

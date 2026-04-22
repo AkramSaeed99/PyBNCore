@@ -97,6 +97,7 @@ class _CPTTableModel(QAbstractTableModel):
 class NodeInspectorPanel(QWidget):
     rename_requested = Signal(str)
     delete_requested = Signal(str)
+    edit_states_requested = Signal(str)
 
     def __init__(self, viewmodel: MainViewModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -128,9 +129,12 @@ class NodeInspectorPanel(QWidget):
         action_row = QHBoxLayout()
         self._rename_btn = QPushButton("Rename…")
         self._rename_btn.clicked.connect(self._on_rename)
+        self._edit_states_btn = QPushButton("Edit States…")
+        self._edit_states_btn.clicked.connect(self._on_edit_states)
         self._delete_btn = QPushButton("Delete")
         self._delete_btn.clicked.connect(self._on_delete)
         action_row.addWidget(self._rename_btn)
+        action_row.addWidget(self._edit_states_btn)
         action_row.addWidget(self._delete_btn)
         action_row.addStretch()
         layout.addLayout(action_row)
@@ -277,6 +281,7 @@ class NodeInspectorPanel(QWidget):
         self._cpt_title.setVisible(visible)
         self._cpt_view.setVisible(visible)
         self._rename_btn.setEnabled(visible)
+        self._edit_states_btn.setEnabled(visible)
         self._delete_btn.setEnabled(visible)
         self._apply_btn.setEnabled(visible)
         self._normalize_btn.setEnabled(visible)
@@ -311,6 +316,10 @@ class NodeInspectorPanel(QWidget):
     def _on_rename(self) -> None:
         if self._current is not None:
             self.rename_requested.emit(self._current.id)
+
+    def _on_edit_states(self) -> None:
+        if self._current is not None:
+            self.edit_states_requested.emit(self._current.id)
 
     def _on_delete(self) -> None:
         if self._current is None:

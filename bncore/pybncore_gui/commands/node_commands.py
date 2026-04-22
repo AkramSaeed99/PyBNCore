@@ -144,6 +144,49 @@ class AddEquationNodeCommand(_BaseNodeCommand):
         self._notify()
 
 
+class EditStatesCommand(_BaseNodeCommand):
+    def __init__(
+        self,
+        service: AuthoringService,
+        on_structure_changed: StructureChangedCallback,
+        name: str,
+        new_states: Sequence[str],
+    ) -> None:
+        super().__init__(f"Edit states of '{name}'", service, on_structure_changed)
+        self._name = name
+        self._new_states = tuple(new_states)
+        self._prior: NodeSnapshot | None = None
+        self._prior_children_cpts: dict[str, "np.ndarray"] = {}
+
+    def redo(self) -> None:  # type: ignore[override]
+        self._prior = self._service.update_node_states(self._name, self._new_states)
+        # Capture child CPTs at the moment of the first run so undo restores
+        # both this node's CPT and the affected children's CPTs.
+        self._prior_children_cpts = {}
+        if self._prior is not None:
+            for child in self._prior.children:
+                child_snap = self._service.node_snapshot(child)
+                if child_snap.cpt_flat.size:
+                    self._prior_children_cpts[child] = child_snap.cpt_flat
+        self._notify()
+
+    def undo(self) -> None:  # type: ignore[override]
+        if self._prior is None:
+            return
+        self._service.update_node_states(self._name, self._prior.states)
+        if self._prior.cpt_flat.size:
+            try:
+                self._service.set_flat_cpt(self._name, self._prior.cpt_flat)
+            except Exception:
+                pass
+        for child, flat in self._prior_children_cpts.items():
+            try:
+                self._service.set_flat_cpt(child, flat)
+            except Exception:
+                pass
+        self._notify()
+
+
 class RenameNodeCommand(_BaseNodeCommand):
     def __init__(
         self,

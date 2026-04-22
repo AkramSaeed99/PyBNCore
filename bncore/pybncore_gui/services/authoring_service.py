@@ -323,6 +323,42 @@ class AuthoringService:
             full = self._snapshot_locked(wrapper)
             self._rebuild_locked(wrapper, full, rename=(old, new))
 
+    def update_node_states(self, name: str, new_states: Sequence[str]) -> NodeSnapshot:
+        """Replace a node's discrete state list.
+
+        Returns a snapshot of the node as it was *before* the change so callers
+        can undo. CPTs for the node itself and for every child reset to
+        uniform because their shapes change with the new cardinalities.
+        """
+        self._validate_states(new_states)
+        with self._session.locked() as wrapper:
+            if wrapper is None:
+                raise CompileError("No model loaded")
+            if name not in set(wrapper.nodes()):
+                raise EvidenceError(f"Unknown node: '{name}'")
+            before = self._node_snapshot_locked(wrapper, name)
+            full = self._snapshot_locked(wrapper)
+            # Build a new snapshot with updated states for `name`; downstream
+            # CPTs reset inside `_rebuild_locked` because our state override
+            # will mismatch the recorded parent-states in affected children.
+            new_states = tuple(new_states)
+            updated_states = {
+                k: (new_states if k == name else v) for k, v in full.states.items()
+            }
+            patched = GraphSnapshot(
+                order=full.order,
+                states=updated_states,
+                parents=full.parents,
+                cpts=full.cpts,
+            )
+            affected_children = tuple(wrapper.children(name))
+            self._rebuild_locked(
+                wrapper,
+                patched,
+                reset_cpt_for=frozenset({name, *affected_children}),
+            )
+            return before
+
     # ------------------------------------------------------------------ edges
 
     def add_edge(self, parent: str, child: str) -> np.ndarray:
@@ -413,6 +449,7 @@ class AuthoringService:
         exclude_node: str | None = None,
         rename: tuple[str, str] | None = None,
         remove_parent_edges: Mapping[str, set[str]] | None = None,
+        reset_cpt_for: frozenset[str] = frozenset(),
     ) -> None:
         rename_map: dict[str, str] = {}
         if rename is not None:
@@ -464,9 +501,14 @@ class AuthoringService:
                 if not (exclude_node is not None and p == exclude_node)
                 and not (remove_parent_edges and name in remove_parent_edges and p in remove_parent_edges[name])
             ]
-            if [rn(p) for p in effective_old_parents] == new_parents[new_name]:
+            force_reset = name in reset_cpt_for or new_name in reset_cpt_for
+            if not force_reset and [rn(p) for p in effective_old_parents] == new_parents[new_name]:
                 flat = np.asarray(snap.cpts.get(name), dtype=np.float64)
-                if flat.size:
+                expected_rows = 1
+                for p in new_parents[new_name]:
+                    expected_rows *= max(1, len(new_states[p]))
+                expected_size = expected_rows * len(new_states[new_name])
+                if flat.size == expected_size:
                     graph.set_cpt(new_name, flat)
                     new_cpts[new_name] = flat
                 else:
