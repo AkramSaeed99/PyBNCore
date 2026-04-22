@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QGraphicsScene, QMenu
 from pybncore_gui.domain.node import EdgeModel, NodeModel
 from pybncore_gui.domain.submodel import ROOT_ID, SubModelLayout
 from pybncore_gui.views.graph_canvas.edge_item import EdgeItem
+from pybncore_gui.views.graph_canvas.ghost_anchor import GhostAnchorItem
 from pybncore_gui.views.graph_canvas.layout import layered_positions
 from pybncore_gui.views.graph_canvas.node_item import NodeItem
 from pybncore_gui.views.graph_canvas.pending_edge import PendingEdge
@@ -44,6 +45,7 @@ class GraphScene(QGraphicsScene):
         self._nodes: dict[str, NodeItem] = {}
         self._edges: list[EdgeItem] = []
         self._submodels: dict[str, SubModelItem] = {}
+        self._ghosts: list[GhostAnchorItem] = []
         self._pending: Optional[PendingEdge] = None
         self._pending_source: Optional[NodeItem] = None
         self._positions_before_drag: Optional[dict[str, tuple[float, float]]] = None
@@ -125,18 +127,45 @@ class GraphScene(QGraphicsScene):
             return None
 
         seen_stubs: set[tuple[int, int]] = set()
+        ghost_cache: dict[tuple[str, bool], GhostAnchorItem] = {}
+
         for edge in edges:
             src_anchor = resolve_anchor(edge.parent)
             dst_anchor = resolve_anchor(edge.child)
-            if src_anchor is None or dst_anchor is None:
+
+            # If one side has no visible anchor at all, synthesise a ghost
+            # pinned to the scene margin so the user still sees the
+            # connection.
+            src_ghost = src_anchor is None
+            dst_ghost = dst_anchor is None
+
+            if src_ghost and dst_ghost:
+                # Both endpoints invisible — nothing useful to draw.
                 continue
-            src_item, src_is_submodel = src_anchor
-            dst_item, dst_is_submodel = dst_anchor
-            if src_item is dst_item:
+
+            src_item, src_is_submodel = (
+                src_anchor if src_anchor is not None else (None, False)
+            )
+            dst_item, dst_is_submodel = (
+                dst_anchor if dst_anchor is not None else (None, False)
+            )
+
+            if src_ghost:
+                src_item = self._get_or_create_ghost(
+                    ghost_cache, edge.parent, on_right=False, reference=dst_item
+                )
+                src_is_submodel = True
+            if dst_ghost:
+                dst_item = self._get_or_create_ghost(
+                    ghost_cache, edge.child, on_right=True, reference=src_item
+                )
+                dst_is_submodel = True
+
+            if src_item is None or dst_item is None or src_item is dst_item:
                 continue
+
             is_stub = src_is_submodel or dst_is_submodel
             if is_stub:
-                # Collapse multi-edges between the same pair of containers.
                 key = (id(src_item), id(dst_item))
                 if key in seen_stubs:
                     continue
@@ -155,9 +184,12 @@ class GraphScene(QGraphicsScene):
             self.removeItem(item)
         for sub in self._submodels.values():
             self.removeItem(sub)
+        for ghost in self._ghosts:
+            self.removeItem(ghost)
         self._edges.clear()
         self._nodes.clear()
         self._submodels.clear()
+        self._ghosts.clear()
         self._cancel_pending_edge()
         self.setSceneRect(-200, -120, 400, 240)
 
@@ -222,6 +254,38 @@ class GraphScene(QGraphicsScene):
             if isinstance(item, SubModelItem):
                 return item
         return None
+
+    def _get_or_create_ghost(
+        self,
+        cache: dict[tuple[str, bool], GhostAnchorItem],
+        node_id: str,
+        *,
+        on_right: bool,
+        reference,
+    ) -> GhostAnchorItem:
+        key = (node_id, on_right)
+        if key in cache:
+            return cache[key]
+        ghost = GhostAnchorItem(node_id, on_right=on_right)
+        ghost.setToolTip(f"{node_id} — lives in another sub-model")
+        # Position relative to the reference item (on the visible side) or,
+        # if both endpoints are ghosts somehow, to the current items bbox.
+        rect = self.itemsBoundingRect()
+        if reference is not None:
+            ref_rect = reference.mapRectToScene(reference.boundingRect())
+            y = ref_rect.center().y() - ghost.boundingRect().height() / 2
+            if on_right:
+                x = ref_rect.right() + 120.0
+            else:
+                x = ref_rect.left() - 120.0 - ghost.boundingRect().width()
+        else:
+            y = rect.center().y()
+            x = rect.right() + 60 if on_right else rect.left() - 60 - ghost.boundingRect().width()
+        ghost.setPos(QPointF(x, y))
+        self.addItem(ghost)
+        self._ghosts.append(ghost)
+        cache[key] = ghost
+        return ghost
 
     def _nearest_node_within(
         self, scene_pos: QPointF, radius: float
