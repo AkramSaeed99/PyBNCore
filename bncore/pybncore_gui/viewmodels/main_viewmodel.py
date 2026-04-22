@@ -16,11 +16,14 @@ from pybncore_gui.commands import (
     AddEquationNodeCommand,
     AddNodeCommand,
     AddNoisyMaxCommand,
+    DeleteScenarioCommand,
     EditStatesCommand,
     MoveNodesCommand,
     RemoveEdgeCommand,
     RemoveNodeCommand,
     RenameNodeCommand,
+    RenameScenarioCommand,
+    SaveScenarioCommand,
     SetCPTCommand,
 )
 from pybncore_gui.domain.continuous import ContinuousNodeSpec
@@ -149,6 +152,8 @@ class MainViewModel(QObject):
         self._continuous_nodes: list[str] = []
         self._continuous_evidence: dict[str, float] = {}
         self._continuous_likelihoods: dict[str, object] = {}
+        self._continuous_specs: dict[str, ContinuousNodeSpec] = {}
+        self._equation_sources: dict[str, dict] = {}
         self._thread: Optional[QThread] = None
         self._worker: Optional[BaseWorker] = None
         self._undo_stack = QUndoStack(self)
@@ -296,6 +301,8 @@ class MainViewModel(QObject):
                 settings=self.settings,
                 layout=self._layout,
                 descriptions=self._descriptions,
+                continuous_specs=self._continuous_specs,
+                equation_sources=self._equation_sources,
             )
         except DomainError as e:
             self.log_message.emit("error", e.user_message)
@@ -315,6 +322,10 @@ class MainViewModel(QObject):
         self._descriptions = dict(project.descriptions)
         self._current_submodel = ROOT_ID
         self._inference.update_settings(project.settings)
+        # Replay deterministic / continuous authoring layers the XDSL cannot
+        # round-trip on its own.
+        self._replay_equation_sources(project.equation_sources)
+        self._replay_continuous_specs(project.continuous_specs)
         self._on_model_changed(source=f"Loaded project {path}")
         if self._positions:
             self.positions_changed.emit(self.positions)
@@ -440,6 +451,7 @@ class MainViewModel(QObject):
 
     @Slot(object)
     def add_continuous_node(self, spec: ContinuousNodeSpec) -> None:
+        self._continuous_specs[spec.name] = spec
         cmd = AddContinuousNodeCommand(
             self._authoring, self._emit_structure, spec
         )
@@ -507,7 +519,19 @@ class MainViewModel(QObject):
             continuous_evidence=self._continuous_evidence,
             continuous_likelihoods=self._continuous_likelihoods,
         )
+        self._current_hybrid_worker = worker
         self._run_worker(worker, self._on_hybrid_finished, self._on_hybrid_failed)
+
+    @Slot()
+    def cancel_hybrid(self) -> None:
+        worker = getattr(self, "_current_hybrid_worker", None)
+        if worker is not None and hasattr(worker, "cancel"):
+            worker.cancel()
+            self.log_message.emit(
+                "warning",
+                "Hybrid cancel requested — result will be discarded when the "
+                "current iteration completes.",
+            )
 
     @Slot(str, list, list, object)
     def add_equation_node(
@@ -516,6 +540,7 @@ class MainViewModel(QObject):
         states: Sequence[str],
         parents: Sequence[str],
         expression,
+        source: str | None = None,
     ) -> None:
         cmd = AddEquationNodeCommand(
             self._authoring,
@@ -525,6 +550,12 @@ class MainViewModel(QObject):
             parents,
             expression,
         )
+        if source is not None:
+            self._equation_sources[name] = {
+                "source": source,
+                "states": list(states),
+                "parents": list(parents),
+            }
         self._push(cmd)
 
     @Slot(dict, dict)
@@ -698,14 +729,9 @@ class MainViewModel(QObject):
             evidence=dict(self._evidence),
             soft_evidence={k: dict(v) for k, v in self._soft_evidence.items()},
         )
-        # Replace if name already exists.
-        for i, existing in enumerate(self._scenarios):
-            if existing.name == name:
-                self._scenarios[i] = scenario
-                break
-        else:
-            self._scenarios.append(scenario)
-        self.scenarios_changed.emit(self.scenarios)
+        self._push(
+            SaveScenarioCommand(self._scenarios, self._emit_scenarios, scenario)
+        )
         self.log_message.emit("info", f"Saved scenario '{name}'.")
 
     @Slot(str)
@@ -722,11 +748,12 @@ class MainViewModel(QObject):
 
     @Slot(str)
     def delete_scenario(self, name: str) -> None:
-        before = len(self._scenarios)
-        self._scenarios = [s for s in self._scenarios if s.name != name]
-        if len(self._scenarios) != before:
-            self.scenarios_changed.emit(self.scenarios)
-            self.log_message.emit("info", f"Deleted scenario '{name}'.")
+        if not any(s.name == name for s in self._scenarios):
+            return
+        self._push(
+            DeleteScenarioCommand(self._scenarios, self._emit_scenarios, name)
+        )
+        self.log_message.emit("info", f"Deleted scenario '{name}'.")
 
     @Slot(str, str)
     def rename_scenario(self, old: str, new: str) -> None:
@@ -735,11 +762,16 @@ class MainViewModel(QObject):
         if any(s.name == new for s in self._scenarios):
             self.log_message.emit("warning", f"Scenario '{new}' already exists.")
             return
-        for scenario in self._scenarios:
-            if scenario.name == old:
-                scenario.name = new
-                self.scenarios_changed.emit(self.scenarios)
-                return
+        if not any(s.name == old for s in self._scenarios):
+            return
+        self._push(
+            RenameScenarioCommand(
+                self._scenarios, self._emit_scenarios, old, new
+            )
+        )
+
+    def _emit_scenarios(self) -> None:
+        self.scenarios_changed.emit(self.scenarios)
 
     # ------------------------------------------------------------- settings
 
@@ -826,19 +858,25 @@ class MainViewModel(QObject):
         )
         self._run_worker(worker, self._on_voi_finished, self._on_voi_failed)
 
-    @Slot(list, list, list, object)
+    @Slot(list, list, list, object, int)
     def run_benchmark(
         self,
         query_nodes: Sequence[str],
         observed_nodes: Sequence[str],
         row_counts: Sequence[int],
         seed: int | None = None,
+        num_repeats: int = 1,
     ) -> None:
         if not self._guard_busy_or_empty():
             return
         self.benchmark_started.emit()
         worker = BenchmarkWorker(
-            self._analysis, query_nodes, observed_nodes, row_counts, seed
+            self._analysis,
+            query_nodes,
+            observed_nodes,
+            row_counts,
+            seed,
+            num_repeats=num_repeats,
         )
         self._run_worker(worker, self._on_benchmark_finished, self._on_benchmark_failed)
 
@@ -933,6 +971,66 @@ class MainViewModel(QObject):
             "info",
             f"{source} — {len(nodes)} nodes, {len(edges)} edges.",
         )
+
+    def _replay_equation_sources(self, sources: Mapping[str, Mapping]) -> None:
+        self._equation_sources = {}
+        for name, entry in sources.items():
+            source = entry.get("source") if isinstance(entry, Mapping) else None
+            if not source:
+                continue
+            namespace: dict = {}
+            try:
+                exec(compile(source, f"<equation:{name}>", "exec"), namespace)
+            except Exception:
+                logger.exception("Cannot replay equation source for %s", name)
+                continue
+            fn = namespace.get("f")
+            if not callable(fn):
+                continue
+            parents = list(entry.get("parents") or ())
+            try:
+                with self._session.locked() as wrapper:
+                    if wrapper is None:
+                        continue
+                    wrapper.set_equation(name, fn, parents)
+            except Exception:
+                logger.exception("Failed to apply equation to %s", name)
+                continue
+            self._equation_sources[name] = {
+                "source": source,
+                "states": list(entry.get("states") or ()),
+                "parents": parents,
+            }
+
+    def _replay_continuous_specs(self, specs: Sequence[ContinuousNodeSpec]) -> None:
+        self._continuous_specs = {}
+        for spec in specs:
+            try:
+                fn = None
+                if spec.fn_source:
+                    namespace: dict = {}
+                    exec(compile(spec.fn_source, f"<det:{spec.name}>", "exec"), namespace)
+                    fn = namespace.get("f")
+                    if not callable(fn):
+                        fn = None
+                replay_spec = ContinuousNodeSpec(
+                    name=spec.name,
+                    kind=spec.kind,
+                    parents=spec.parents,
+                    domain=spec.domain,
+                    initial_bins=spec.initial_bins,
+                    rare_event_mode=spec.rare_event_mode,
+                    log_spaced=spec.log_spaced,
+                    monotone=spec.monotone,
+                    n_samples=spec.n_samples,
+                    params=dict(spec.params),
+                    fn=fn,
+                    fn_source=spec.fn_source,
+                )
+                self._authoring.add_continuous_node(replay_spec)
+                self._continuous_specs[spec.name] = replay_spec
+            except Exception:
+                logger.exception("Failed to replay continuous spec %s", spec.name)
 
     def _refresh_continuous_nodes(self) -> None:
         session = self._session

@@ -49,7 +49,7 @@ class EquationNodeDialog(QDialog):
         self.setWindowTitle("Add Equation Node")
         self.setModal(True)
         self.resize(720, 600)
-        self._result: tuple[str, tuple[str, ...], tuple[str, ...], Callable] | None = None
+        self._result: tuple[str, tuple[str, ...], tuple[str, ...], Callable, str] | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -243,7 +243,13 @@ class EquationNodeDialog(QDialog):
             return
         states = [s for s in self._current_states() if s]
         parents = self._current_parents()
-        self._result = (name, tuple(states), tuple(parents), fn)
+        self._result = (
+            name,
+            tuple(states),
+            tuple(parents),
+            fn,
+            self._code_edit.toPlainText(),
+        )
         self.accept()
 
     def _error(self, msg: str) -> None:

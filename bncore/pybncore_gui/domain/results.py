@@ -97,8 +97,10 @@ class VOIReport:
 @dataclass(frozen=True, slots=True)
 class BenchmarkPoint:
     num_rows: int
-    elapsed_ms: float
+    elapsed_ms: float         # mean across repeats
     ms_per_row: float
+    std_ms: float = 0.0       # standard deviation across repeats
+    num_repeats: int = 1
 
 
 @dataclass(frozen=True, slots=True)

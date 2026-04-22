@@ -62,6 +62,29 @@ class ModelExplorerPanel(QWidget):
         self._populate(root_item, ROOT_ID, layout)
         self._tree.expand(root_item.index())
 
+        # Noisy-MAX divorcing parents live in the graph under `__…` names;
+        # surface them in a dedicated "Hidden" folder so authors can see
+        # the engine's internal expansion.
+        try:
+            hidden_pairs = self._viewmodel.model_service.list_hidden_relations()
+        except Exception:
+            hidden_pairs = []
+        if hidden_pairs:
+            hidden_root = QStandardItem(f"🔒  Hidden (Noisy-MAX internals) [{len(hidden_pairs)}]")
+            hidden_root.setEditable(False)
+            italic = QFont()
+            italic.setItalic(True)
+            hidden_root.setFont(italic)
+            for hidden_name, child in sorted(hidden_pairs):
+                item = QStandardItem(f"{hidden_name}  → {child}")
+                item.setEditable(False)
+                item.setToolTip(
+                    f"{hidden_name} is a divorcing parent "
+                    f"synthesised under {child}."
+                )
+                hidden_root.appendRow(item)
+            root.appendRow(hidden_root)
+
         # Expand down to the current sub-model so it's visible by default.
         current = self._viewmodel.current_submodel
         if current and current != ROOT_ID:

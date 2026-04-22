@@ -427,6 +427,7 @@ class MainWindow(QMainWindow):
         self._scene.nodes_moved.connect(self._on_scene_nodes_moved)
         self._scene.enter_submodel_requested.connect(vm.enter_submodel)
         self._scene.submodel_moved.connect(vm.update_submodel_position)
+        self._scene.palette_drop.connect(self._on_palette_drop)
         self._scene.add_submodel_requested.connect(self._on_scene_add_submodel)
         self._scene.rename_submodel_requested.connect(self._on_scene_rename_submodel)
         self._scene.delete_submodel_requested.connect(self._on_scene_delete_submodel)
@@ -595,8 +596,10 @@ class MainWindow(QMainWindow):
         payload = dlg.result_data()
         if payload is None:
             return
-        name, states, parents, fn = payload
-        self._viewmodel.add_equation_node(name, list(states), list(parents), fn)
+        name, states, parents, fn, source = payload
+        self._viewmodel.add_equation_node(
+            name, list(states), list(parents), fn, source
+        )
 
     def _open_continuous_dialog(self) -> None:
         if not self._viewmodel.session.has_model:
@@ -697,6 +700,10 @@ class MainWindow(QMainWindow):
 
     def _on_new_submodel(self) -> None:
         self._on_scene_add_submodel(self._viewmodel.current_submodel)
+
+    def _on_palette_drop(self, kind: str, x: float, y: float) -> None:
+        if kind == "discrete":
+            self._open_add_node_dialog(position=(x, y))
 
     def _on_scene_add_submodel(self, parent_id: str) -> None:
         name, ok = QInputDialog.getText(self, "New sub-model", "Sub-model name:")

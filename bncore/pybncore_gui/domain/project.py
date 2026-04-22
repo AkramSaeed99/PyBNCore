@@ -6,11 +6,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from pybncore_gui.domain.continuous import ContinuousNodeSpec
 from pybncore_gui.domain.scenario import Scenario
 from pybncore_gui.domain.settings import EngineSettings
 from pybncore_gui.domain.submodel import SubModelLayout
 
-PROJECT_VERSION = 4
+PROJECT_VERSION = 5
 
 
 @dataclass(slots=True)
@@ -21,6 +22,8 @@ class ProjectFile:
     settings: EngineSettings = field(default_factory=EngineSettings)
     layout: SubModelLayout = field(default_factory=SubModelLayout)
     descriptions: dict[str, str] = field(default_factory=dict)
+    continuous_specs: list[ContinuousNodeSpec] = field(default_factory=list)
+    equation_sources: dict[str, dict] = field(default_factory=dict)
     version: int = PROJECT_VERSION
 
     def to_json(self) -> str:
@@ -32,6 +35,8 @@ class ProjectFile:
             "settings": self.settings.to_dict(),
             "layout": self.layout.to_dict(),
             "descriptions": dict(self.descriptions),
+            "continuous_specs": [s.to_dict() for s in self.continuous_specs],
+            "equation_sources": {k: dict(v) for k, v in self.equation_sources.items()},
         }
         return json.dumps(payload, indent=2, sort_keys=True)
 
@@ -61,6 +66,17 @@ class ProjectFile:
         descriptions = {
             str(k): str(v) for k, v in (data.get("descriptions") or {}).items()
         }
+        continuous_specs_raw = data.get("continuous_specs") or []
+        continuous_specs = [
+            ContinuousNodeSpec.from_dict(s)
+            for s in continuous_specs_raw
+            if isinstance(s, Mapping)
+        ]
+        equation_sources = {
+            str(k): dict(v)
+            for k, v in (data.get("equation_sources") or {}).items()
+            if isinstance(v, Mapping)
+        }
         return cls(
             xdsl_relative=data.get("xdsl_relative"),
             positions=positions,
@@ -68,6 +84,8 @@ class ProjectFile:
             settings=settings,
             layout=layout,
             descriptions=descriptions,
+            continuous_specs=continuous_specs,
+            equation_sources=equation_sources,
             version=int(data.get("version", PROJECT_VERSION)),
         )
 

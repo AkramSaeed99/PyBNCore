@@ -14,6 +14,8 @@ class BenchmarkWorker(BaseWorker):
         observed_nodes: Sequence[str],
         row_counts: Sequence[int],
         seed: int | None = None,
+        *,
+        num_repeats: int = 1,
     ) -> None:
         super().__init__()
         self._service = service
@@ -21,6 +23,7 @@ class BenchmarkWorker(BaseWorker):
         self._observed = list(observed_nodes)
         self._row_counts = list(row_counts)
         self._seed = seed
+        self._num_repeats = int(num_repeats)
 
     def _execute(self) -> object:
         self.progress.emit(5, "Running benchmark…")
@@ -28,6 +31,7 @@ class BenchmarkWorker(BaseWorker):
             self._query,
             self._observed,
             self._row_counts,
+            num_repeats=self._num_repeats,
             seed=self._seed,
             progress=self.progress.emit,
         )

@@ -182,6 +182,10 @@ class ContinuousPosteriorPanel(QWidget):
         self._run_btn = QPushButton("Run Hybrid Query")
         self._run_btn.clicked.connect(self._viewmodel.run_hybrid)
         header.addWidget(self._run_btn)
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.clicked.connect(self._viewmodel.cancel_hybrid)
+        header.addWidget(self._cancel_btn)
         layout.addLayout(header)
 
         self._diagnostics = QLabel("No hybrid result yet.")
@@ -278,12 +282,16 @@ class ContinuousPosteriorPanel(QWidget):
         self._viewmodel.hybrid_started.connect(self._on_started)
         self._viewmodel.hybrid_finished.connect(self._on_finished)
         self._viewmodel.hybrid_failed.connect(self._on_failed)
-        self._viewmodel.busy_changed.connect(lambda b: self._run_btn.setEnabled(not b))
+        self._viewmodel.busy_changed.connect(self._on_busy_changed)
         self._viewmodel.continuous_nodes_changed.connect(
             lambda *_: self._run_btn.setEnabled(
                 not self._viewmodel.is_busy and bool(self._viewmodel.continuous_nodes)
             )
         )
+
+    def _on_busy_changed(self, busy: bool) -> None:
+        self._run_btn.setEnabled(not busy)
+        self._cancel_btn.setEnabled(busy)
 
     # ----------------------------------------------------------- events
 

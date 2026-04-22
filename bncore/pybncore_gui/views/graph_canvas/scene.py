@@ -34,6 +34,7 @@ class GraphScene(QGraphicsScene):
     rename_requested = Signal(str)
     remove_edge_requested = Signal(str, str)
     add_node_requested_at = Signal(float, float)
+    palette_drop = Signal(str, float, float)        # kind, scene x, scene y
     enter_submodel_requested = Signal(str)
     add_submodel_requested = Signal(str)           # parent submodel id
     rename_submodel_requested = Signal(str)        # submodel id
@@ -480,6 +481,33 @@ class GraphScene(QGraphicsScene):
     def _select_programmatic(self, node_id: str) -> None:
         self.select_node(node_id)
         self.node_selected.emit(node_id)
+
+    # -------------------------------------------------- palette drag/drop
+
+    def dragEnterEvent(self, event):  # type: ignore[override]
+        from pybncore_gui.views.panels.palette_panel import PALETTE_MIME
+        if event.mimeData().hasFormat(PALETTE_MIME):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):  # type: ignore[override]
+        from pybncore_gui.views.panels.palette_panel import PALETTE_MIME
+        if event.mimeData().hasFormat(PALETTE_MIME):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):  # type: ignore[override]
+        from pybncore_gui.views.panels.palette_panel import PALETTE_MIME
+        md = event.mimeData()
+        if not md.hasFormat(PALETTE_MIME):
+            super().dropEvent(event)
+            return
+        kind = bytes(md.data(PALETTE_MIME)).decode("utf-8", errors="ignore") or "discrete"
+        pos = event.scenePos()
+        self.palette_drop.emit(kind, pos.x(), pos.y())
+        event.acceptProposedAction()
 
     # ------------------------------------------------------------- helpers
 

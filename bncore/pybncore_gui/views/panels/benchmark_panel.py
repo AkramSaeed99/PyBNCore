@@ -57,6 +57,11 @@ class BenchmarkPanel(QWidget):
         self._seed_spin.setRange(0, 2**31 - 1)
         self._seed_spin.setValue(42)
         row2.addWidget(self._seed_spin)
+        row2.addWidget(QLabel("Repeats:"))
+        self._repeats_spin = QSpinBox()
+        self._repeats_spin.setRange(1, 100)
+        self._repeats_spin.setValue(3)
+        row2.addWidget(self._repeats_spin)
         self._run_btn = QPushButton("Run benchmark")
         self._run_btn.clicked.connect(self._run)
         row2.addWidget(self._run_btn)
@@ -74,8 +79,8 @@ class BenchmarkPanel(QWidget):
         self._error_banner.setVisible(False)
         layout.addWidget(self._error_banner)
 
-        self._table = QTableWidget(0, 3, self)
-        self._table.setHorizontalHeaderLabels(["Rows", "Elapsed (ms)", "ms / row"])
+        self._table = QTableWidget(0, 4, self)
+        self._table.setHorizontalHeaderLabels(["Rows", "Elapsed (ms)", "ms / row", "std (ms)"])
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
@@ -120,7 +125,13 @@ class BenchmarkPanel(QWidget):
             self._error_banner.setVisible(True)
             return
         self._error_banner.setVisible(False)
-        self._viewmodel.run_benchmark(query, observed, row_counts, int(self._seed_spin.value()))
+        self._viewmodel.run_benchmark(
+            query,
+            observed,
+            row_counts,
+            int(self._seed_spin.value()),
+            int(self._repeats_spin.value()),
+        )
 
     def _on_started(self) -> None:
         self._error_banner.setVisible(False)
@@ -139,8 +150,16 @@ class BenchmarkPanel(QWidget):
             per_item = QTableWidgetItem(f"{pt.ms_per_row:.4f}")
             per_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self._table.setItem(row, 2, per_item)
+            std_item = QTableWidgetItem(
+                f"{pt.std_ms:.2f}" if pt.num_repeats > 1 else "—"
+            )
+            std_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self._table.setItem(row, 3, std_item)
+        label = "Mean elapsed (ms) per batch size"
+        if any(pt.num_repeats > 1 for pt in result.points):
+            label += f"  (±std, n={result.points[0].num_repeats})"
         self._chart.set_data(
-            "Elapsed (ms) per batch size",
+            label,
             [(str(pt.num_rows), pt.elapsed_ms) for pt in result.points],
         )
 

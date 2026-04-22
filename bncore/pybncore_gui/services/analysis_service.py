@@ -148,6 +148,7 @@ class AnalysisService:
         observed_nodes: Sequence[str],
         row_counts: Sequence[int],
         *,
+        num_repeats: int = 1,
         seed: int | None = None,
         progress: _ProgressCb | None = None,
     ) -> BenchmarkResult:
@@ -156,6 +157,7 @@ class AnalysisService:
         row_counts = [int(x) for x in row_counts if int(x) > 0]
         if not row_counts:
             raise QueryError("Provide at least one positive row count.")
+        num_repeats = max(1, int(num_repeats))
         rng = np.random.default_rng(seed)
 
         with self._session.locked() as wrapper:
@@ -183,19 +185,29 @@ class AnalysisService:
                         if observed_nodes
                         else None
                     )
-                    if progress is not None:
-                        progress(
-                            int(10 + 80 * idx / max(1, len(row_counts))),
-                            f"Timing {n_rows} rows…",
-                        )
-                    t0 = time.perf_counter()
-                    wrapper.batch_query_marginals(list(query_nodes), matrix)
-                    elapsed = (time.perf_counter() - t0) * 1000.0
+                    samples: list[float] = []
+                    for rep in range(num_repeats):
+                        if progress is not None:
+                            frac = (idx * num_repeats + rep) / max(
+                                1, len(row_counts) * num_repeats
+                            )
+                            progress(
+                                int(10 + 80 * frac),
+                                f"Timing {n_rows} rows (rep {rep + 1}/{num_repeats})…",
+                            )
+                        t0 = time.perf_counter()
+                        wrapper.batch_query_marginals(list(query_nodes), matrix)
+                        samples.append((time.perf_counter() - t0) * 1000.0)
+                    arr = np.asarray(samples, dtype=np.float64)
+                    mean_ms = float(arr.mean())
+                    std_ms = float(arr.std(ddof=1)) if num_repeats > 1 else 0.0
                     points.append(
                         BenchmarkPoint(
                             num_rows=n_rows,
-                            elapsed_ms=float(elapsed),
-                            ms_per_row=float(elapsed) / max(1, n_rows),
+                            elapsed_ms=mean_ms,
+                            ms_per_row=mean_ms / max(1, n_rows),
+                            std_ms=std_ms,
+                            num_repeats=num_repeats,
                         )
                     )
             except QueryError:

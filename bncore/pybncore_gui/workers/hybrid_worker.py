@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
+from PySide6.QtCore import Slot
+
+from pybncore_gui.domain.errors import QueryError
 from pybncore_gui.services.inference_service import InferenceService
 from pybncore_gui.workers.base_worker import BaseWorker
 
@@ -30,6 +33,13 @@ class HybridQueryWorker(BaseWorker):
         self._soft = {k: dict(v) for k, v in (soft_evidence or {}).items()}
         self._continuous_evidence = dict(continuous_evidence or {})
         self._continuous_likelihoods = dict(continuous_likelihoods or {})
+        self._cancelled: bool = False
+
+    @Slot()
+    def cancel(self) -> None:
+        """Cooperative cancel — flip the flag; `_execute` discards the
+        result when the (atomic) wrapper call finally returns."""
+        self._cancelled = True
 
     def _execute(self) -> object:
         self.progress.emit(
@@ -46,5 +56,7 @@ class HybridQueryWorker(BaseWorker):
             continuous_evidence=self._continuous_evidence,
             continuous_likelihoods=self._continuous_likelihoods,
         )
+        if self._cancelled:
+            raise QueryError("Cancelled by user")
         self.progress.emit(100, "Hybrid query complete")
         return result

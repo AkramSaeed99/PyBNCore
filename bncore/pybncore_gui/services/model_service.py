@@ -32,6 +32,25 @@ class ModelService:
                 nodes.append(NodeModel(id=node_id, kind=kind, states=states, parents=parents))
             return nodes
 
+    def list_hidden_relations(self) -> list[tuple[str, str]]:
+        """Return (hidden_name, visible_child_name) pairs for divorcing parents
+        introduced by `wrapper.add_noisy_max`. Hidden names start with `__`.
+        """
+        out: list[tuple[str, str]] = []
+        with self._session.locked() as wrapper:
+            if wrapper is None:
+                return out
+            all_names = list(wrapper._node_names)
+            visible = set(wrapper.nodes())
+            for name in all_names:
+                if not name.startswith("__"):
+                    continue
+                for child in wrapper.children(name):
+                    if child in visible:
+                        out.append((name, child))
+                        break
+            return out
+
     def list_edges(self) -> list[EdgeModel]:
         with self._session.locked() as wrapper:
             if wrapper is None:

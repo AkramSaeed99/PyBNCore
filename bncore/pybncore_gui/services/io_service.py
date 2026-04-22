@@ -9,6 +9,7 @@ import numpy as np
 from pybncore import PyBNCoreWrapper
 from pybncore.io import read_bif, write_xdsl
 
+from pybncore_gui.domain.continuous import ContinuousNodeSpec
 from pybncore_gui.domain.errors import ModelIOError
 from pybncore_gui.domain.project import ProjectFile
 from pybncore_gui.domain.scenario import Scenario
@@ -110,6 +111,8 @@ class IOService:
         settings: EngineSettings | None = None,
         layout: SubModelLayout | None = None,
         descriptions: Mapping[str, str] | None = None,
+        continuous_specs: Mapping[str, ContinuousNodeSpec] | None = None,
+        equation_sources: Mapping[str, Mapping] | None = None,
     ) -> Path:
         """Write `<path>.pbnproj` sidecar alongside the current XDSL."""
         path = Path(path)
@@ -138,6 +141,8 @@ class IOService:
             settings=settings or EngineSettings(),
             layout=layout or SubModelLayout(),
             descriptions=dict(descriptions or {}),
+            continuous_specs=list((continuous_specs or {}).values()),
+            equation_sources={k: dict(v) for k, v in (equation_sources or {}).items()},
         )
         project_path = path.with_suffix(".pbnproj")
         try:

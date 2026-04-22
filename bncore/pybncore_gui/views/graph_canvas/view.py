@@ -13,6 +13,7 @@ class GraphView(QGraphicsView):
     def __init__(self, scene) -> None:
         super().__init__(scene)
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        self.setAcceptDrops(True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)

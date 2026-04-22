@@ -11,7 +11,10 @@ pytest.importorskip("pybncore")
 
 from pybncore_gui.domain.continuous import ContinuousDistKind, ContinuousNodeSpec
 from pybncore_gui.domain.errors import EvidenceError, QueryError
+from pybncore_gui.domain.project import ProjectFile
+from pybncore_gui.domain.scenario import Scenario
 from pybncore_gui.domain.session import ModelSession
+from pybncore_gui.domain.settings import EngineSettings
 from pybncore_gui.services.analysis_service import AnalysisService
 from pybncore_gui.services.authoring_service import AuthoringService
 from pybncore_gui.services.inference_service import InferenceService
@@ -204,6 +207,89 @@ def test_submodel_round_trip(asia_mini_path: pathlib.Path, tmp_path):
 
 
 # -------------------------------------------------------------- continuous
+
+
+def test_benchmark_with_repeats_has_std(session_with_asia):
+    analysis = AnalysisService(session_with_asia)
+    result = analysis.benchmark(
+        query_nodes=["Cancer"],
+        observed_nodes=["XRay"],
+        row_counts=[8],
+        num_repeats=3,
+        seed=0,
+    )
+    pt = result.points[0]
+    assert pt.num_repeats == 3
+    assert pt.std_ms >= 0.0
+
+
+def test_loopy_bp_batch_matches_exact_on_polytree(session_with_asia):
+    inf = InferenceService(session_with_asia)
+    rows = [{"XRay": "pos"}, {"XRay": "neg"}]
+    inf.update_settings(EngineSettings())
+    exact = inf.batch_query(["Cancer"], rows)
+    inf.update_settings(EngineSettings(use_loopy_bp=True))
+    loopy = inf.batch_query(["Cancer"], rows)
+    assert exact.marginals["Cancer"].shape == loopy.marginals["Cancer"].shape
+    # Asia is a polytree — loopy BP is exact here.
+    assert np.allclose(
+        exact.marginals["Cancer"], loopy.marginals["Cancer"], atol=1e-6
+    )
+
+
+def test_hidden_relations_after_noisy_max(session_with_asia):
+    auth = AuthoringService(session_with_asia)
+    ms = ModelService(session_with_asia)
+    link_smoker = np.array([[0.1, 0.9], [0.9, 0.1]], dtype=np.float64)
+    link_cancer = np.array([[0.05, 0.95], [0.8, 0.2]], dtype=np.float64)
+    leak = np.array([0.9, 0.1], dtype=np.float64)
+    auth.add_noisy_max_node(
+        "Risk",
+        ["low", "high"],
+        ["Smoker", "Cancer"],
+        {"Smoker": link_smoker, "Cancer": link_cancer},
+        leak,
+    )
+    relations = ms.list_hidden_relations()
+    assert relations, "expected hidden divorcing parents to be reported"
+    hidden_names = {h for h, _ in relations}
+    assert all(name.startswith("__") for name in hidden_names)
+    assert all(child == "Risk" for _, child in relations)
+
+
+def test_project_round_trip_with_specs_and_scenarios(tmp_path):
+    spec = ContinuousNodeSpec(
+        name="X",
+        kind=ContinuousDistKind.NORMAL,
+        parents=(),
+        domain=(-3.0, 3.0),
+        initial_bins=6,
+        params={"mu": 0.0, "sigma": 1.0},
+    )
+    proj = ProjectFile(
+        xdsl_relative="asia_mini.xdsl",
+        positions={"Smoker": (10.0, 20.0)},
+        scenarios=[Scenario(name="S1", evidence={"Smoker": "yes"})],
+        settings=EngineSettings(triangulation="min_degree"),
+        descriptions={"XRay": "chest x-ray"},
+        continuous_specs=[spec],
+        equation_sources={
+            "E": {
+                "source": "def f():\n    return 'a'\n",
+                "states": ["a", "b"],
+                "parents": [],
+            }
+        },
+    )
+    path = tmp_path / "proj.pbnproj"
+    proj.write(path)
+    parsed = ProjectFile.read(path)
+    assert parsed.version >= 5
+    assert parsed.scenarios[0].name == "S1"
+    assert parsed.settings.triangulation == "min_degree"
+    assert parsed.continuous_specs[0].params["mu"] == 0.0
+    assert parsed.equation_sources["E"]["parents"] == []
+    assert parsed.descriptions["XRay"] == "chest x-ray"
 
 
 def test_continuous_creation_and_hybrid_query(tmp_path):

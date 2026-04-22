@@ -150,11 +150,6 @@ class InferenceService:
         query_nodes: Sequence[str],
         evidence_rows: Sequence[Mapping[str, str]],
     ) -> BatchQueryResult:
-        if self._settings.use_loopy_bp:
-            raise QueryError(
-                "Batch queries are not supported in loopy-BP mode. "
-                "Disable loopy BP in Engine Settings to run batch."
-            )
         if not query_nodes:
             raise QueryError("Select at least one node to query.")
         if not evidence_rows:
@@ -168,29 +163,41 @@ class InferenceService:
                     k for row in evidence_rows for k in row.keys()
                 })
                 self._validate_evidence_columns(wrapper, evidence_columns)
-                matrix = self._build_evidence_matrix(wrapper, evidence_rows)
-                self._ensure_jt(wrapper)
-                marginals_raw = wrapper.batch_query_marginals(list(query_nodes), matrix)
+
+                state_labels: dict[str, tuple[str, ...]] = {
+                    n: tuple(wrapper.get_outcomes(n)) for n in query_nodes
+                }
+                marginals: dict[str, np.ndarray]
+
+                if self._settings.use_loopy_bp:
+                    marginals = self._loopy_batch_locked(
+                        wrapper, list(query_nodes), list(evidence_rows), state_labels
+                    )
+                else:
+                    matrix = self._build_evidence_matrix(wrapper, evidence_rows)
+                    self._ensure_jt(wrapper)
+                    marginals_raw = wrapper.batch_query_marginals(
+                        list(query_nodes), matrix
+                    )
+                    marginals = {}
+                    for node in query_nodes:
+                        states = state_labels[node]
+                        value = marginals_raw[node]
+                        if isinstance(value, dict):
+                            arr = np.stack(
+                                [np.asarray(value[s], dtype=np.float64) for s in states],
+                                axis=-1,
+                            )
+                        else:
+                            arr = np.asarray(value, dtype=np.float64)
+                            if arr.ndim == 1:
+                                arr = arr.reshape(-1, len(states))
+                        marginals[node] = arr
+            except QueryError:
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.exception("Batch query failed")
                 raise QueryError(str(e)) from e
-
-            state_labels: dict[str, tuple[str, ...]] = {}
-            marginals: dict[str, np.ndarray] = {}
-            for node in query_nodes:
-                states = tuple(wrapper.get_outcomes(node))
-                state_labels[node] = states
-                value = marginals_raw[node]
-                if isinstance(value, dict):
-                    # Convert dict-of-states → ndarray[n_rows, n_states]
-                    arr = np.stack(
-                        [np.asarray(value[s], dtype=np.float64) for s in states], axis=-1
-                    )
-                else:
-                    arr = np.asarray(value, dtype=np.float64)
-                    if arr.ndim == 1:
-                        arr = arr.reshape(-1, len(states))
-                marginals[node] = arr
 
             return BatchQueryResult(
                 nodes=tuple(query_nodes),
@@ -199,6 +206,31 @@ class InferenceService:
                 state_labels=state_labels,
                 num_rows=len(evidence_rows),
             )
+
+    def _loopy_batch_locked(
+        self,
+        wrapper,
+        query_nodes: list[str],
+        rows: list[Mapping[str, str]],
+        state_labels: Mapping[str, tuple[str, ...]],
+    ) -> dict[str, np.ndarray]:
+        engine = self._build_loopy(wrapper)
+        # Accumulate posteriors row-by-row. Loopy BP has no native batch path,
+        # but run-per-row is how users typically wrap it.
+        accumulators: dict[str, list[np.ndarray]] = {n: [] for n in query_nodes}
+        for row in rows:
+            result = engine.infer(evidence=dict(row) if row else None)
+            for node in query_nodes:
+                arr = np.asarray(result[node], dtype=np.float64)
+                if arr.size != len(state_labels[node]):
+                    raise QueryError(
+                        f"Loopy BP returned wrong marginal size for '{node}'."
+                    )
+                accumulators[node].append(arr)
+        return {
+            node: np.stack(rows_matrix, axis=0)
+            for node, rows_matrix in accumulators.items()
+        }
 
     # ----------------------------------------------------- evidence helpers
 
