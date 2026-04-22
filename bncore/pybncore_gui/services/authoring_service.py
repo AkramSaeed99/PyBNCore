@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 from pybncore import Graph
 
+from pybncore_gui.domain.continuous import ContinuousDistKind, ContinuousNodeSpec
 from pybncore_gui.domain.errors import CompileError, DomainError, EvidenceError
 from pybncore_gui.domain.session import ModelSession
 
@@ -103,6 +104,209 @@ class AuthoringService:
                 exclude_node=name,
             )
             return snap
+
+    # --------------------------------------------------- specialised nodes
+
+    def add_noisy_max_node(
+        self,
+        name: str,
+        states: Sequence[str],
+        parents: Sequence[str],
+        link_matrices: Mapping[str, np.ndarray],
+        leak_probs: np.ndarray,
+    ) -> None:
+        self._validate_name(name)
+        self._validate_states(states)
+        if not parents:
+            raise EvidenceError("Noisy-MAX nodes require at least one parent.")
+        leak = np.asarray(leak_probs, dtype=np.float64)
+        if leak.ndim != 1 or leak.shape[0] != len(states):
+            raise EvidenceError(
+                f"Leak vector must be 1D with {len(states)} entries."
+            )
+        if not np.isclose(leak.sum(), 1.0, atol=1e-6):
+            raise EvidenceError("Leak probabilities must sum to 1.0.")
+        if np.any(leak < -1e-12) or np.any(leak > 1 + 1e-12):
+            raise EvidenceError("Leak probabilities must lie in [0, 1].")
+
+        with self._session.locked() as wrapper:
+            if wrapper is None:
+                raise CompileError("No model loaded")
+            known = set(wrapper.nodes())
+            if name in known:
+                raise EvidenceError(f"A node named '{name}' already exists.")
+            missing = [p for p in parents if p not in known]
+            if missing:
+                raise EvidenceError(f"Unknown parents: {missing}")
+
+            normalised: dict[str, np.ndarray] = {}
+            for p in parents:
+                if p not in link_matrices:
+                    raise EvidenceError(f"Missing link matrix for parent '{p}'.")
+                m = np.asarray(link_matrices[p], dtype=np.float64)
+                parent_card = len(wrapper.get_outcomes(p))
+                if m.shape != (parent_card, len(states)):
+                    raise EvidenceError(
+                        f"Link matrix for '{p}' must be shape "
+                        f"({parent_card}, {len(states)}); got {m.shape}."
+                    )
+                rows = m.sum(axis=1)
+                if not np.allclose(rows, 1.0, atol=1e-6):
+                    raise EvidenceError(
+                        f"Link-matrix rows for parent '{p}' must sum to 1.0."
+                    )
+                if np.any(m < -1e-12) or np.any(m > 1 + 1e-12):
+                    raise EvidenceError(
+                        f"Link-matrix values for parent '{p}' must lie in [0, 1]."
+                    )
+                normalised[p] = m
+
+            try:
+                wrapper.add_noisy_max(
+                    name,
+                    list(states),
+                    list(parents),
+                    normalised,
+                    leak,
+                )
+            except Exception as e:  # noqa: BLE001
+                raise EvidenceError(f"Noisy-MAX creation failed: {e}") from e
+            self._invalidate(wrapper)
+
+    def add_continuous_node(self, spec: ContinuousNodeSpec) -> None:
+        self._validate_name(spec.name)
+        lo, hi = float(spec.domain[0]), float(spec.domain[1])
+        if not (hi > lo):
+            raise EvidenceError("Domain upper bound must exceed lower bound.")
+        if spec.initial_bins < 2:
+            raise EvidenceError("Need at least 2 initial bins.")
+
+        with self._session.locked() as wrapper:
+            if wrapper is None:
+                raise CompileError("No model loaded")
+            known = set(wrapper.nodes())
+            if spec.name in known:
+                raise EvidenceError(f"A node named '{spec.name}' already exists.")
+            missing = [p for p in spec.parents if p not in known]
+            if missing:
+                raise EvidenceError(f"Unknown parents: {missing}")
+
+            try:
+                self._dispatch_continuous(wrapper, spec, (lo, hi))
+            except EvidenceError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise EvidenceError(f"Continuous node creation failed: {e}") from e
+            self._invalidate(wrapper)
+
+    def add_threshold(self, node: str, threshold: float) -> None:
+        with self._session.locked() as wrapper:
+            if wrapper is None:
+                raise CompileError("No model loaded")
+            try:
+                wrapper.add_threshold(node, float(threshold))
+            except Exception as e:  # noqa: BLE001
+                raise EvidenceError(f"Threshold rejected: {e}") from e
+            self._invalidate(wrapper)
+
+    def _dispatch_continuous(
+        self,
+        wrapper,
+        spec: ContinuousNodeSpec,
+        domain: tuple[float, float],
+    ) -> None:
+        kind = spec.kind
+        params = spec.params
+        parents = list(spec.parents)
+        if kind is ContinuousDistKind.NORMAL:
+            wrapper.add_normal(
+                spec.name,
+                parents=parents,
+                mu=float(params.get("mu", 0.0)),
+                sigma=float(params.get("sigma", 1.0)),
+                domain=domain,
+                initial_bins=int(spec.initial_bins),
+                rare_event_mode=bool(spec.rare_event_mode),
+            )
+        elif kind is ContinuousDistKind.LOGNORMAL:
+            wrapper.add_lognormal(
+                spec.name,
+                parents=parents,
+                log_mu=float(params.get("log_mu", 0.0)),
+                log_sigma=float(params.get("log_sigma", 1.0)),
+                domain=domain,
+                initial_bins=int(spec.initial_bins),
+                log_spaced=bool(spec.log_spaced),
+                rare_event_mode=bool(spec.rare_event_mode),
+            )
+        elif kind is ContinuousDistKind.UNIFORM:
+            wrapper.add_uniform(
+                spec.name,
+                parents=parents,
+                a=float(params.get("a", domain[0])),
+                b=float(params.get("b", domain[1])),
+                domain=domain,
+                initial_bins=int(spec.initial_bins),
+            )
+        elif kind is ContinuousDistKind.EXPONENTIAL:
+            wrapper.add_exponential(
+                spec.name,
+                parents=parents,
+                rate=float(params.get("rate", 1.0)),
+                domain=domain,
+                initial_bins=int(spec.initial_bins),
+                log_spaced=bool(spec.log_spaced),
+            )
+        elif kind is ContinuousDistKind.DETERMINISTIC:
+            if spec.fn is None:
+                raise EvidenceError("Deterministic nodes require a callable expression.")
+            if not parents:
+                raise EvidenceError("Deterministic nodes require at least one parent.")
+            wrapper.add_deterministic(
+                spec.name,
+                parents=parents,
+                fn=spec.fn,
+                domain=domain,
+                initial_bins=int(spec.initial_bins),
+                monotone=bool(spec.monotone),
+                n_samples=int(spec.n_samples),
+            )
+        else:  # pragma: no cover — enum is exhaustive
+            raise EvidenceError(f"Unsupported distribution kind: {kind}")
+
+    def add_equation_node(
+        self,
+        name: str,
+        states: Sequence[str],
+        parents: Sequence[str],
+        expression: Callable[..., str],
+    ) -> None:
+        self._validate_name(name)
+        self._validate_states(states)
+        if not callable(expression):
+            raise EvidenceError("Equation must be a callable.")
+
+        with self._session.locked() as wrapper:
+            if wrapper is None:
+                raise CompileError("No model loaded")
+            known = set(wrapper.nodes())
+            if name in known:
+                raise EvidenceError(f"A node named '{name}' already exists.")
+            missing = [p for p in parents if p not in known]
+            if missing:
+                raise EvidenceError(f"Unknown parents: {missing}")
+
+            graph = self._ensure_graph(wrapper)
+            graph.add_variable(name, list(states))
+            for p in parents:
+                graph.add_edge(p, name)
+            wrapper._cache_metadata()
+
+            try:
+                wrapper.set_equation(name, expression, list(parents))
+            except Exception as e:  # noqa: BLE001
+                raise EvidenceError(f"Equation evaluation failed: {e}") from e
+            self._invalidate(wrapper)
 
     def rename_node(self, old: str, new: str) -> None:
         self._validate_name(new)
@@ -299,8 +503,10 @@ class AuthoringService:
         self._session.invalidate_compile()
 
     def _snapshot_locked(self, wrapper) -> GraphSnapshot:
-        order = tuple(wrapper.nodes())
-        states = {n: tuple(wrapper.get_outcomes(n)) for n in order}
+        # Include hidden parent-divorcing nodes introduced by add_noisy_max
+        # (names starting with `__`) so they survive structural rebuilds.
+        order = tuple(wrapper._node_names)
+        states = {n: tuple(wrapper._node_states.get(n, [])) for n in order}
         parents = {n: tuple(wrapper.parents(n)) for n in order}
         cpts: dict[str, np.ndarray] = {}
         for n in order:

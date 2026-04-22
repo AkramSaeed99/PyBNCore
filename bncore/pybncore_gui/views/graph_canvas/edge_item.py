@@ -1,8 +1,4 @@
-"""Directed edge (parent → child) drawn as a bezier with a small arrowhead.
-
-The path is stroked (no fill) so the interior of the cubic curve does not fill
-as a closed region. Only the arrowhead polygon is filled.
-"""
+"""Directed edge. Endpoints may be nodes or sub-model containers."""
 from __future__ import annotations
 
 import math
@@ -17,21 +13,29 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
 )
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
-from pybncore_gui.views.graph_canvas.node_item import NODE_HEIGHT, NODE_WIDTH, NodeItem
-
-_COLOR = QColor("#4a5a76")
+_COLOR = QColor("#2f3a52")
 _COLOR_SELECTED = QColor("#1a56db")
-_ARROW_SIZE = 10.0
-_PEN_WIDTH = 1.6
+_COLOR_STUB = QColor("#7080a0")
+_ARROW_LENGTH = 16.0
+_ARROW_HALF_WIDTH = 7.0
+_PEN_WIDTH = 1.8
+_TIP_MARGIN = 10.0
 
 
 class EdgeItem(QGraphicsItem):
-    def __init__(self, source: NodeItem, target: NodeItem) -> None:
+    def __init__(
+        self,
+        source: QGraphicsObject,
+        target: QGraphicsObject,
+        *,
+        stub: bool = False,
+    ) -> None:
         super().__init__()
         self._source = source
         self._target = target
+        self._stub = bool(stub)
         self._path: QPainterPath = QPainterPath()
         self._arrow: QPolygonF = QPolygonF()
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -39,11 +43,11 @@ class EdgeItem(QGraphicsItem):
         self.update_path()
 
     @property
-    def source(self) -> NodeItem:
+    def source(self) -> QGraphicsObject:
         return self._source
 
     @property
-    def target(self) -> NodeItem:
+    def target(self) -> QGraphicsObject:
         return self._target
 
     # -------------------------------------------------- geometry / hit-testing
@@ -52,7 +56,7 @@ class EdgeItem(QGraphicsItem):
         rect = self._path.boundingRect()
         if not self._arrow.isEmpty():
             rect = rect.united(self._arrow.boundingRect())
-        pad = _PEN_WIDTH + _ARROW_SIZE
+        pad = _PEN_WIDTH + _ARROW_LENGTH
         return rect.adjusted(-pad, -pad, pad, pad)
 
     def shape(self) -> QPainterPath:  # type: ignore[override]
@@ -70,11 +74,18 @@ class EdgeItem(QGraphicsItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:  # type: ignore[override]
         painter.setRenderHint(QPainter.Antialiasing)
-        color = _COLOR_SELECTED if self.isSelected() else _COLOR
+        if self.isSelected():
+            color = _COLOR_SELECTED
+        elif self._stub:
+            color = _COLOR_STUB
+        else:
+            color = _COLOR
 
         pen = QPen(color, _PEN_WIDTH)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
+        if self._stub:
+            pen.setStyle(Qt.DashLine)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(self._path)
@@ -86,31 +97,60 @@ class EdgeItem(QGraphicsItem):
 
     # ------------------------------------------------------- path computation
 
-    def update_path(self) -> None:
-        p1 = self._source.pos() + QPointF(NODE_WIDTH, NODE_HEIGHT / 2)
-        p2 = self._target.pos() + QPointF(0.0, NODE_HEIGHT / 2)
+    @staticmethod
+    def _anchor_points(item: QGraphicsObject, side: str) -> QPointF:
+        rect = item.boundingRect()
+        pos = item.pos()
+        y = pos.y() + rect.top() + rect.height() / 2
+        if side == "right":
+            x = pos.x() + rect.right()
+        else:
+            x = pos.x() + rect.left()
+        return QPointF(x, y)
 
-        dx = max(60.0, abs(p2.x() - p1.x()) / 2.0)
-        c1 = QPointF(p1.x() + dx, p1.y())
-        c2 = QPointF(p2.x() - dx, p2.y())
+    def update_path(self) -> None:
+        source_anchor = self._anchor_points(self._source, "right")
+        target_anchor = self._anchor_points(self._target, "left")
+
+        # Tip sits just outside the target item.
+        if target_anchor.x() >= source_anchor.x():
+            tip = QPointF(target_anchor.x() - _TIP_MARGIN, target_anchor.y())
+            control_x_src = source_anchor.x()
+            control_x_tgt = tip.x()
+        else:
+            # Target is to the left of the source — route around with a dip.
+            tip = QPointF(target_anchor.x() - _TIP_MARGIN, target_anchor.y())
+            control_x_src = source_anchor.x() + 80
+            control_x_tgt = tip.x() - 80
+
+        dx = max(60.0, abs(tip.x() - source_anchor.x()) / 2.0)
+        c1 = QPointF(control_x_src + dx, source_anchor.y())
+        c2 = QPointF(control_x_tgt - dx, tip.y())
 
         self.prepareGeometryChange()
 
-        path = QPainterPath(p1)
-        path.cubicTo(c1, c2, p2)
-        self._path = path
+        line = QLineF(c2, tip)
+        length = math.hypot(line.dx(), line.dy()) or 1.0
+        dir_x = line.dx() / length
+        dir_y = line.dy() / length
+        nx, ny = -dir_y, dir_x
 
-        # Arrowhead: isoceles triangle at p2, pointing along tangent (c2 → p2).
-        line = QLineF(c2, p2)
-        angle = math.atan2(-line.dy(), line.dx())
-        arrow_p1 = p2 - QPointF(
-            math.sin(angle + math.pi / 3) * _ARROW_SIZE,
-            math.cos(angle + math.pi / 3) * _ARROW_SIZE,
+        base = QPointF(
+            tip.x() - dir_x * _ARROW_LENGTH,
+            tip.y() - dir_y * _ARROW_LENGTH,
         )
-        arrow_p2 = p2 - QPointF(
-            math.sin(angle + math.pi - math.pi / 3) * _ARROW_SIZE,
-            math.cos(angle + math.pi - math.pi / 3) * _ARROW_SIZE,
+        left = QPointF(
+            base.x() + nx * _ARROW_HALF_WIDTH,
+            base.y() + ny * _ARROW_HALF_WIDTH,
         )
-        self._arrow = QPolygonF([p2, arrow_p1, arrow_p2])
+        right = QPointF(
+            base.x() - nx * _ARROW_HALF_WIDTH,
+            base.y() - ny * _ARROW_HALF_WIDTH,
+        )
+
+        path = QPainterPath(source_anchor)
+        path.cubicTo(c1, c2, base)
+        self._path = path
+        self._arrow = QPolygonF([tip, left, right])
 
         self.update()

@@ -11,7 +11,11 @@ from pybncore.io import read_bif, write_xdsl
 
 from pybncore_gui.domain.errors import ModelIOError
 from pybncore_gui.domain.project import ProjectFile
+from pybncore_gui.domain.scenario import Scenario
 from pybncore_gui.domain.session import ModelSession
+from pybncore_gui.domain.settings import EngineSettings
+from pybncore_gui.domain.submodel import SubModelLayout
+from pybncore_gui.services.submodel_service import SubModelService
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,14 @@ logger = logging.getLogger(__name__)
 class IOService:
     def __init__(self, session: ModelSession) -> None:
         self._session = session
+        self._submodel_service = SubModelService()
+
+    @property
+    def submodel_service(self) -> SubModelService:
+        return self._submodel_service
+
+    def parse_submodel_layout(self, path: str | Path) -> SubModelLayout:
+        return self._submodel_service.parse_from_xdsl(path)
 
     # --------------------------------------------------------- XDSL / BIF IO
 
@@ -51,7 +63,14 @@ class IOService:
             raise ModelIOError(f"Unable to initialise model from BIF: {e}") from e
         self._session.set_wrapper(wrapper, source_path=None)
 
-    def save_xdsl(self, path: str | Path) -> None:
+    def save_xdsl(
+        self,
+        path: str | Path,
+        *,
+        layout: SubModelLayout | None = None,
+        node_positions: Mapping[str, tuple[float, float]] | None = None,
+        descriptions: Mapping[str, str] | None = None,
+    ) -> None:
         path = Path(path)
         with self._session.locked() as wrapper:
             if wrapper is None or wrapper._graph is None:
@@ -61,6 +80,17 @@ class IOService:
             except Exception as e:  # noqa: BLE001
                 logger.exception("XDSL save failed: %s", path)
                 raise ModelIOError(f"Failed to save '{path.name}': {e}") from e
+        if layout is not None:
+            try:
+                self._submodel_service.inject_genie_extensions(
+                    path,
+                    layout,
+                    dict(node_positions or {}),
+                    network_name=path.stem or "PyBNCore Network",
+                    descriptions=dict(descriptions or {}),
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to inject genie extensions")
         self._session.set_source_path(str(path))
 
     def new_empty(self) -> None:
@@ -77,23 +107,37 @@ class IOService:
         path: str | Path,
         positions: Mapping[str, tuple[float, float]],
         scenarios: list[dict] | None = None,
+        settings: EngineSettings | None = None,
+        layout: SubModelLayout | None = None,
+        descriptions: Mapping[str, str] | None = None,
     ) -> Path:
-        """Write `<path>.pbnproj` sidecar alongside the current XDSL.
-
-        The XDSL itself is saved next to it with the same basename if the
-        model does not yet have an on-disk source.
-        """
+        """Write `<path>.pbnproj` sidecar alongside the current XDSL."""
         path = Path(path)
         project_dir = path.parent
         project_dir.mkdir(parents=True, exist_ok=True)
 
         xdsl_path = path.with_suffix(".xdsl")
-        self.save_xdsl(xdsl_path)
+        self.save_xdsl(
+            xdsl_path,
+            layout=layout,
+            node_positions=positions,
+            descriptions=descriptions,
+        )
+
+        scenario_objs: list[Scenario] = []
+        for s in scenarios or []:
+            if isinstance(s, Scenario):
+                scenario_objs.append(s)
+            else:
+                scenario_objs.append(Scenario.from_dict(dict(s)))
 
         project = ProjectFile(
             xdsl_relative=xdsl_path.name,
             positions=dict(positions),
-            scenarios=list(scenarios or []),
+            scenarios=scenario_objs,
+            settings=settings or EngineSettings(),
+            layout=layout or SubModelLayout(),
+            descriptions=dict(descriptions or {}),
         )
         project_path = path.with_suffix(".pbnproj")
         try:

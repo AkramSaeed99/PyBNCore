@@ -1,8 +1,9 @@
 """QUndoCommand subclasses for node-scoped mutations."""
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
+import numpy as np
 from PySide6.QtGui import QUndoCommand
 
 from pybncore_gui.services.authoring_service import AuthoringService, NodeSnapshot
@@ -77,6 +78,69 @@ class RemoveNodeCommand(_BaseNodeCommand):
                 pass
         if snap.cpt_flat.size:
             self._service.set_flat_cpt(snap.name, snap.cpt_flat)
+        self._notify()
+
+
+class AddNoisyMaxCommand(_BaseNodeCommand):
+    def __init__(
+        self,
+        service: AuthoringService,
+        on_structure_changed: StructureChangedCallback,
+        name: str,
+        states: Sequence[str],
+        parents: Sequence[str],
+        link_matrices: Mapping[str, np.ndarray],
+        leak_probs: np.ndarray,
+    ) -> None:
+        super().__init__(f"Add Noisy-MAX '{name}'", service, on_structure_changed)
+        self._name = name
+        self._states = tuple(states)
+        self._parents = tuple(parents)
+        self._link_matrices = {k: np.asarray(v, dtype=np.float64).copy() for k, v in link_matrices.items()}
+        self._leak_probs = np.asarray(leak_probs, dtype=np.float64).copy()
+
+    def redo(self) -> None:  # type: ignore[override]
+        self._service.add_noisy_max_node(
+            self._name,
+            self._states,
+            self._parents,
+            self._link_matrices,
+            self._leak_probs,
+        )
+        self._notify()
+
+    def undo(self) -> None:  # type: ignore[override]
+        self._service.remove_node(self._name)
+        self._notify()
+
+
+class AddEquationNodeCommand(_BaseNodeCommand):
+    def __init__(
+        self,
+        service: AuthoringService,
+        on_structure_changed: StructureChangedCallback,
+        name: str,
+        states: Sequence[str],
+        parents: Sequence[str],
+        expression: Callable[..., str],
+    ) -> None:
+        super().__init__(f"Add equation node '{name}'", service, on_structure_changed)
+        self._name = name
+        self._states = tuple(states)
+        self._parents = tuple(parents)
+        self._expression = expression
+
+    def redo(self) -> None:  # type: ignore[override]
+        self._service.add_equation_node(
+            self._name,
+            self._states,
+            self._parents,
+            self._expression,
+        )
+        self._notify()
+
+    def undo(self) -> None:  # type: ignore[override]
+        self._service.remove_node(self._name)
         self._notify()
 
 

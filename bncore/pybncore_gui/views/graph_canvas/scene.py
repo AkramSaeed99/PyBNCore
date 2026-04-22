@@ -1,10 +1,10 @@
-"""GraphScene — reconciles NodeModel / EdgeModel lists with Qt items.
+"""GraphScene — renders the portion of the model that lives in the currently
+active sub-model.
 
-Phase 2 additions:
-- drag-to-connect (click a node's output port, drag to another node)
-- context menus (right-click on node or empty canvas)
-- move coalescing (emits `nodes_moved` with before/after maps so the viewmodel
-  can push a single MoveNodesCommand)
+Nodes whose `node_parent[id] == current_submodel_id` and sub-models whose
+`parent_id == current_submodel_id` are shown. Edges are drawn only when both
+endpoints are visible in the current scope. Cross-boundary edges are hidden in
+Phase 1 of the sub-model feature.
 """
 from __future__ import annotations
 
@@ -15,64 +15,129 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QGraphicsScene, QMenu
 
 from pybncore_gui.domain.node import EdgeModel, NodeModel
+from pybncore_gui.domain.submodel import ROOT_ID, SubModelLayout
 from pybncore_gui.views.graph_canvas.edge_item import EdgeItem
 from pybncore_gui.views.graph_canvas.layout import layered_positions
 from pybncore_gui.views.graph_canvas.node_item import NodeItem
 from pybncore_gui.views.graph_canvas.pending_edge import PendingEdge
+from pybncore_gui.views.graph_canvas.submodel_item import SubModelItem
 
 
 class GraphScene(QGraphicsScene):
     node_selected = Signal(str)
     node_double_clicked = Signal(str)
     edge_requested = Signal(str, str)
-    nodes_moved = Signal(dict, dict)                  # before, after
-    delete_requested = Signal(str)                    # node id
+    nodes_moved = Signal(dict, dict)
+    submodel_moved = Signal(str, float, float)
+    delete_requested = Signal(str)
     rename_requested = Signal(str)
     remove_edge_requested = Signal(str, str)
     add_node_requested_at = Signal(float, float)
+    enter_submodel_requested = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self._nodes: dict[str, NodeItem] = {}
         self._edges: list[EdgeItem] = []
+        self._submodels: dict[str, SubModelItem] = {}
         self._pending: Optional[PendingEdge] = None
         self._pending_source: Optional[NodeItem] = None
         self._positions_before_drag: Optional[dict[str, tuple[float, float]]] = None
+        self._layout: SubModelLayout = SubModelLayout()
+        self._current_submodel: str = ROOT_ID
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ---------------------------------------------------------------- model
 
-    def set_model(
+    def set_view(
         self,
         nodes: Iterable[NodeModel],
         edges: Iterable[EdgeModel],
+        layout: SubModelLayout,
+        current_submodel: str = ROOT_ID,
         positions: Optional[dict[str, tuple[float, float]]] = None,
+        descriptions: Optional[dict[str, str]] = None,
     ) -> None:
         nodes = list(nodes)
         edges = list(edges)
-        if positions is None:
-            positions = {}
+        self._layout = layout
+        self._current_submodel = current_submodel
+        positions = positions or {}
+        descriptions = descriptions or {}
 
-        # Preserve existing positions where possible.
-        existing_positions = {nid: (item.pos().x(), item.pos().y()) for nid, item in self._nodes.items()}
+        existing_positions = {
+            nid: (item.pos().x(), item.pos().y()) for nid, item in self._nodes.items()
+        }
         merged_positions = {**existing_positions, **positions}
 
         self.clear_graph()
-        auto_positions = layered_positions(nodes, edges)
-        for node in nodes:
-            item = NodeItem(node)
+
+        visible_node_ids = {
+            n.id for n in nodes if layout.node_parent.get(n.id, ROOT_ID) == current_submodel
+        }
+        visible_submodel_ids = [
+            sid for sid, sm in layout.submodels.items() if sm.parent_id == current_submodel
+        ]
+
+        visible_nodes = [n for n in nodes if n.id in visible_node_ids]
+        auto_positions = layered_positions(visible_nodes, edges)
+
+        for sid in visible_submodel_ids:
+            sm = layout.submodels[sid]
+            item = SubModelItem(sm)
+            left, top, *_ = sm.position
+            item.setPos(QPointF(left, top))
+            item.double_clicked.connect(self.enter_submodel_requested.emit)
+            self.addItem(item)
+            self._submodels[sid] = item
+
+        for node in visible_nodes:
+            item = NodeItem(node, description=descriptions.get(node.id, ""))
             x, y = merged_positions.get(node.id, auto_positions.get(node.id, (0.0, 0.0)))
             item.setPos(QPointF(x, y))
             item.node_double_clicked.connect(self.node_double_clicked.emit)
             self.addItem(item)
             self._nodes[node.id] = item
 
+        visible_submodel_set = set(visible_submodel_ids)
+
+        def resolve_anchor(node_id: str):
+            """Find the visible item representing `node_id` in the current scope.
+
+            Returns a tuple (QGraphicsObject, is_submodel) or None if the node
+            (and every ancestor sub-model) lives outside the current scope.
+            """
+            if node_id in self._nodes:
+                return self._nodes[node_id], False
+            parent = layout.node_parent.get(node_id, ROOT_ID)
+            cur = parent
+            while cur != ROOT_ID:
+                if cur in visible_submodel_set:
+                    return self._submodels[cur], True
+                sm = layout.submodels.get(cur)
+                if sm is None:
+                    break
+                cur = sm.parent_id
+            return None
+
+        seen_stubs: set[tuple[int, int]] = set()
         for edge in edges:
-            src = self._nodes.get(edge.parent)
-            dst = self._nodes.get(edge.child)
-            if src is None or dst is None:
+            src_anchor = resolve_anchor(edge.parent)
+            dst_anchor = resolve_anchor(edge.child)
+            if src_anchor is None or dst_anchor is None:
                 continue
-            edge_item = EdgeItem(src, dst)
+            src_item, src_is_submodel = src_anchor
+            dst_item, dst_is_submodel = dst_anchor
+            if src_item is dst_item:
+                continue
+            is_stub = src_is_submodel or dst_is_submodel
+            if is_stub:
+                # Collapse multi-edges between the same pair of containers.
+                key = (id(src_item), id(dst_item))
+                if key in seen_stubs:
+                    continue
+                seen_stubs.add(key)
+            edge_item = EdgeItem(src_item, dst_item, stub=is_stub)
             self.addItem(edge_item)
             self._edges.append(edge_item)
 
@@ -84,13 +149,25 @@ class GraphScene(QGraphicsScene):
             self.removeItem(edge)
         for item in self._nodes.values():
             self.removeItem(item)
+        for sub in self._submodels.values():
+            self.removeItem(sub)
         self._edges.clear()
         self._nodes.clear()
+        self._submodels.clear()
         self._cancel_pending_edge()
         self.setSceneRect(-200, -120, 400, 240)
 
     def current_positions(self) -> dict[str, tuple[float, float]]:
         return {nid: (item.pos().x(), item.pos().y()) for nid, item in self._nodes.items()}
+
+    def submodel_positions(self) -> dict[str, tuple[float, float, float, float]]:
+        out: dict[str, tuple[float, float, float, float]] = {}
+        for sid, item in self._submodels.items():
+            rect = item.boundingRect()
+            left = item.pos().x()
+            top = item.pos().y()
+            out[sid] = (left, top, left + rect.width(), top + rect.height())
+        return out
 
     def apply_positions(self, positions: dict[str, tuple[float, float]]) -> None:
         self.blockSignals(True)
@@ -133,6 +210,12 @@ class GraphScene(QGraphicsScene):
     def _node_item_at(self, scene_pos: QPointF) -> Optional[NodeItem]:
         for item in self.items(scene_pos):
             if isinstance(item, NodeItem):
+                return item
+        return None
+
+    def _submodel_item_at(self, scene_pos: QPointF) -> Optional[SubModelItem]:
+        for item in self.items(scene_pos):
+            if isinstance(item, SubModelItem):
                 return item
         return None
 
@@ -182,7 +265,6 @@ class GraphScene(QGraphicsScene):
             scene_pos = event.scenePos()
             target = self._node_item_at(scene_pos)
             if target is None:
-                # Forgiving snap: if the cursor is near any node, take it.
                 target = self._nearest_node_within(scene_pos, radius=40.0)
             source = self._pending_source
             self._cancel_pending_edge()
@@ -193,6 +275,10 @@ class GraphScene(QGraphicsScene):
 
         super().mouseReleaseEvent(event)
         self._refresh_edges()
+
+        # Emit sub-model position updates on release so the layout persists.
+        for sid, item in self._submodels.items():
+            self.submodel_moved.emit(sid, item.pos().x(), item.pos().y())
 
         before = self._positions_before_drag
         self._positions_before_drag = None
@@ -220,6 +306,15 @@ class GraphScene(QGraphicsScene):
         super().keyPressEvent(event)
 
     def contextMenuEvent(self, event):  # type: ignore[override]
+        sub = self._submodel_item_at(event.scenePos())
+        if isinstance(sub, SubModelItem):
+            menu = QMenu()
+            enter = QAction(f"Enter '{sub.submodel_id}'", menu)
+            enter.triggered.connect(lambda _=False, s=sub.submodel_id: self.enter_submodel_requested.emit(s))
+            menu.addAction(enter)
+            menu.exec(event.screenPos())
+            return
+
         item = self._node_item_at(event.scenePos())
         menu = QMenu()
         if isinstance(item, NodeItem):

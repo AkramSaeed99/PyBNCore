@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from pybncore_gui.domain.session import ModelSession
+from pybncore_gui.services.analysis_service import AnalysisService
 from pybncore_gui.services.authoring_service import AuthoringService
 from pybncore_gui.services.inference_service import InferenceService
 from pybncore_gui.services.io_service import IOService
@@ -39,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     inference_service = InferenceService(session)
     authoring_service = AuthoringService(session)
     validation_service = ValidationService(session)
+    analysis_service = AnalysisService(session)
     viewmodel = MainViewModel(
         session,
         io_service,
@@ -46,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         inference_service,
         authoring_service,
         validation_service,
+        analysis_service,
     )
 
     window = MainWindow(viewmodel)

@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 
 from pybncore_gui.domain.node import NodeModel
 
-NODE_WIDTH = 160.0
-NODE_HEIGHT = 72.0
+NODE_WIDTH = 200.0
+NODE_HEIGHT = 92.0
 PORT_RADIUS = 8.0
 
 _FILL = QColor("#f4f6fb")
@@ -33,9 +33,10 @@ class NodeItem(QGraphicsObject):
     node_double_clicked = Signal(str)
     node_selected = Signal(str)
 
-    def __init__(self, model: NodeModel) -> None:
+    def __init__(self, model: NodeModel, description: str = "") -> None:
         super().__init__()
         self._model = model
+        self._description = description
         self._evidence_state: str | None = None
         self._hover_out_port = False
         self._hover_in_port = False
@@ -61,6 +62,13 @@ class NodeItem(QGraphicsObject):
         if state == self._evidence_state:
             return
         self._evidence_state = state
+        self.setToolTip(self._build_tooltip())
+        self.update()
+
+    def set_description(self, description: str) -> None:
+        if description == self._description:
+            return
+        self._description = description
         self.setToolTip(self._build_tooltip())
         self.update()
 
@@ -125,29 +133,44 @@ class NodeItem(QGraphicsObject):
 
         painter.setPen(QPen(_TEXT))
         title_font = QFont()
-        title_font.setPointSize(10)
+        title_font.setPointSize(13)
         title_font.setBold(True)
         painter.setFont(title_font)
         painter.drawText(
-            QRectF(12, 8, NODE_WIDTH - 24, 22),
+            QRectF(14, 8, NODE_WIDTH - 28, 26),
             Qt.AlignLeft | Qt.AlignVCenter,
-            self._model.id,
+            self._display_label(),
         )
 
-        sub_font = QFont()
-        sub_font.setPointSize(8)
-        painter.setFont(sub_font)
+        desc_font = QFont()
+        desc_font.setPointSize(10)
+        painter.setFont(desc_font)
         painter.setPen(QPen(_SUBTEXT))
+        desc_rect = QRectF(14, 34, NODE_WIDTH - 28, 24)
+        if self._description:
+            painter.drawText(
+                desc_rect,
+                int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap),
+                self._description,
+            )
+
+        sub_font = QFont()
+        sub_font.setPointSize(10)
+        painter.setFont(sub_font)
         painter.drawText(
-            QRectF(12, 30, NODE_WIDTH - 24, 18),
+            QRectF(14, NODE_HEIGHT - 40, NODE_WIDTH - 28, 18),
             Qt.AlignLeft | Qt.AlignVCenter,
             self._subtitle(),
         )
 
         if self._evidence_state is not None:
+            ev_font = QFont()
+            ev_font.setPointSize(11)
+            ev_font.setBold(True)
+            painter.setFont(ev_font)
             painter.setPen(QPen(QColor("#8a6100")))
             painter.drawText(
-                QRectF(12, 50, NODE_WIDTH - 24, 16),
+                QRectF(14, NODE_HEIGHT - 22, NODE_WIDTH - 28, 18),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 f"= {self._evidence_state}",
             )
@@ -197,8 +220,13 @@ class NodeItem(QGraphicsObject):
             return f"{states} states · {parents} parent{'s' if parents != 1 else ''}"
         return f"{parents} parent{'s' if parents != 1 else ''}"
 
+    def _display_label(self) -> str:
+        return self._model.id
+
     def _build_tooltip(self) -> str:
         parts = [self._model.id]
+        if self._description:
+            parts.append(self._description)
         if self._model.states:
             parts.append("States: " + ", ".join(self._model.states))
         if self._model.parents:

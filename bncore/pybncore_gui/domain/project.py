@@ -2,23 +2,37 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-PROJECT_VERSION = 1
+from pybncore_gui.domain.scenario import Scenario
+from pybncore_gui.domain.settings import EngineSettings
+from pybncore_gui.domain.submodel import SubModelLayout
+
+PROJECT_VERSION = 4
 
 
 @dataclass(slots=True)
 class ProjectFile:
     xdsl_relative: str | None = None
     positions: dict[str, tuple[float, float]] = field(default_factory=dict)
-    scenarios: list[dict] = field(default_factory=list)   # Phase 3 placeholder
+    scenarios: list[Scenario] = field(default_factory=list)
+    settings: EngineSettings = field(default_factory=EngineSettings)
+    layout: SubModelLayout = field(default_factory=SubModelLayout)
+    descriptions: dict[str, str] = field(default_factory=dict)
     version: int = PROJECT_VERSION
 
     def to_json(self) -> str:
-        payload = asdict(self)
-        payload["positions"] = {k: list(v) for k, v in self.positions.items()}
+        payload = {
+            "version": self.version,
+            "xdsl_relative": self.xdsl_relative,
+            "positions": {k: list(v) for k, v in self.positions.items()},
+            "scenarios": [s.to_dict() for s in self.scenarios],
+            "settings": self.settings.to_dict(),
+            "layout": self.layout.to_dict(),
+            "descriptions": dict(self.descriptions),
+        }
         return json.dumps(payload, indent=2, sort_keys=True)
 
     @classmethod
@@ -27,10 +41,33 @@ class ProjectFile:
         positions = {
             k: (float(v[0]), float(v[1])) for k, v in data.get("positions", {}).items()
         }
+        scenarios_raw = data.get("scenarios", []) or []
+        scenarios: list[Scenario] = []
+        for s in scenarios_raw:
+            if isinstance(s, dict):
+                scenarios.append(Scenario.from_dict(s))
+        settings_raw = data.get("settings")
+        settings = (
+            EngineSettings.from_dict(settings_raw)
+            if isinstance(settings_raw, Mapping)
+            else EngineSettings()
+        )
+        layout_raw = data.get("layout")
+        layout = (
+            SubModelLayout.from_dict(layout_raw)
+            if isinstance(layout_raw, Mapping)
+            else SubModelLayout()
+        )
+        descriptions = {
+            str(k): str(v) for k, v in (data.get("descriptions") or {}).items()
+        }
         return cls(
             xdsl_relative=data.get("xdsl_relative"),
             positions=positions,
-            scenarios=list(data.get("scenarios", [])),
+            scenarios=scenarios,
+            settings=settings,
+            layout=layout,
+            descriptions=descriptions,
             version=int(data.get("version", PROJECT_VERSION)),
         )
 

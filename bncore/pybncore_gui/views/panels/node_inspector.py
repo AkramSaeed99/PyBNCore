@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QTableView,
@@ -134,6 +135,20 @@ class NodeInspectorPanel(QWidget):
         action_row.addStretch()
         layout.addLayout(action_row)
 
+        layout.addWidget(QLabel("<b>Description</b>"))
+        self._description_edit = QPlainTextEdit()
+        self._description_edit.setPlaceholderText(
+            "Human-readable description of this node (GUI-only, saved to sidecar + XDSL comment)."
+        )
+        self._description_edit.setFixedHeight(80)
+        layout.addWidget(self._description_edit)
+        desc_actions = QHBoxLayout()
+        self._save_desc_btn = QPushButton("Save description")
+        self._save_desc_btn.clicked.connect(self._on_save_description)
+        desc_actions.addStretch()
+        desc_actions.addWidget(self._save_desc_btn)
+        layout.addLayout(desc_actions)
+
         self._cpt_title = QLabel("Conditional probability table")
         self._cpt_title.setStyleSheet("font-weight: 600; margin-top: 4px;")
         layout.addWidget(self._cpt_title)
@@ -169,6 +184,7 @@ class NodeInspectorPanel(QWidget):
         self._viewmodel.model_loaded.connect(lambda *_: self._show_empty())
         self._viewmodel.structure_changed.connect(self._on_structure_changed)
         self._viewmodel.model_cleared.connect(self._show_empty)
+        self._viewmodel.descriptions_changed.connect(lambda *_: self._refresh_description())
 
     # -------------------------------------------------------- internal logic
 
@@ -183,6 +199,7 @@ class NodeInspectorPanel(QWidget):
             return
         self._current = match
         self._show_node(match)
+        self._refresh_description()
 
     def _on_structure_changed(self, *_args) -> None:
         # If our node was removed / renamed, selection will get updated elsewhere.
@@ -264,6 +281,30 @@ class NodeInspectorPanel(QWidget):
         self._apply_btn.setEnabled(visible)
         self._normalize_btn.setEnabled(visible)
         self._revert_btn.setEnabled(visible)
+        self._description_edit.setEnabled(visible)
+        self._save_desc_btn.setEnabled(visible)
+        if not visible:
+            self._description_edit.blockSignals(True)
+            self._description_edit.setPlainText("")
+            self._description_edit.blockSignals(False)
+
+    def _refresh_description(self) -> None:
+        if self._current is None:
+            return
+        desc = self._viewmodel.descriptions.get(self._current.id, "")
+        self._description_edit.blockSignals(True)
+        try:
+            if self._description_edit.toPlainText() != desc:
+                self._description_edit.setPlainText(desc)
+        finally:
+            self._description_edit.blockSignals(False)
+
+    def _on_save_description(self) -> None:
+        if self._current is None:
+            return
+        self._viewmodel.set_description(
+            self._current.id, self._description_edit.toPlainText()
+        )
 
     # ------------------------------------------------------------- handlers
 

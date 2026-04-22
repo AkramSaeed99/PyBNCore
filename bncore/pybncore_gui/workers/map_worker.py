@@ -6,22 +6,20 @@ from pybncore_gui.services.inference_service import InferenceService
 from pybncore_gui.workers.base_worker import BaseWorker
 
 
-class QueryWorker(BaseWorker):
+class MAPQueryWorker(BaseWorker):
     def __init__(
         self,
         inference_service: InferenceService,
-        node: str,
         evidence: Mapping[str, str],
         soft_evidence: Mapping[str, Mapping[str, float]] | None = None,
     ) -> None:
         super().__init__()
         self._service = inference_service
-        self._node = node
         self._evidence = dict(evidence)
         self._soft = {k: dict(v) for k, v in (soft_evidence or {}).items()}
 
     def _execute(self) -> object:
-        self.progress.emit(10, f"Querying '{self._node}'…")
-        result = self._service.query_single(self._node, self._evidence, self._soft)
-        self.progress.emit(100, "Query complete")
+        self.progress.emit(10, "Running MAP query…")
+        result = self._service.query_map(self._evidence, self._soft)
+        self.progress.emit(100, "MAP query complete")
         return result
